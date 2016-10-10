@@ -1,0 +1,13 @@
+This is a sample readme in order to force
+git to keep the structure of the repository
+as intended.
+
+/run/input is intended to hold all input
+files for an experimental run. Note that
+typically, any experiment needs:
+
+1) the infoli executable (infoli.x)
+2) the connectivity matrix (cellConnections.txt)
+3) the OpenMP runtime library (necessary for OpenMP-based runs)
+4) the applied input current file (optional)
+5) a file detailing the g_cal parameter of each neuron (optional)

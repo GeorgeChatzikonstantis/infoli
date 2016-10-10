@@ -1,0 +1,14 @@
+This is a sample readme in order to force
+git to keep the structure of the repository
+as intended.
+
+/run/output is intended to hold all output
+files for an experimental run. Note that
+typically, any experiment results in:
+
+1) a file detailing somatic voltage levels
+for every neuron, per simstep. Typically there is
+one file per MPI rank employed (for MPI-based runs)
+2) some form of performance tracking results, whether
+by Unix time calls, Intel VTune profiling or inline
+gettimeofday function calls
