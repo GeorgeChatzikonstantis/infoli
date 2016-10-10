@@ -1,0 +1,53 @@
+Welcome to the repository of the InfOli Project.
+
+This project aims at designing a high-performance
+simulator for the Inferior Olivary Nucleus. It was
+specifically designed with the Intel Xeon Phi (KNC)
+platform in mind, but is expected to work on any
+x86-based architecture.
+
+~~~~~~~~~~
+
+Structure:
+/src holds the source code for the simulator. Notice
+that the code is, for the moment, accelerated under 3
+distinct programming models, MPI, OpenMP and a hybrid
+of the two. The makefile distinguishes between making
+for the phi accelerator and the Xeon (or any x86-based)
+processor. Example of usage: make omp_phi, compiles
+and links the simulator for the phi platform, under the
+OpenMP coding paradigm.
+
+/tools holds generators for input to the InfOli simulator.
+A connectivity matrix (/connectivity) is imperative for
+any simulation, while an applied current (/iapp) is optional.
+Example of usage: make pct, compiles a connectivity matrix
+generator that is based around fixed percentages of network
+density.
+
+/scripts holds queuing and bash scripts. This folder is
+mostly useful when using the simulator on one of the
+supercomputing clusters that it has been tested on. One
+particular example is the STFC Hartree Center idataplex
+cluster. For this particular cluster, a sample script for
+each programming "flavour" of the simulator is given.
+
+/run is the folder where input and output of any experimental
+run is intended to be held. There is also a folder with runtime
+libraries, different for each supercomputing cluster where the
+simulator has been run on (to account for different compiler
+setups).
+
+~~~~~~~~~~
+
+The Project is the fruit of collaboration between
+Microprocessors and Digital Systems Laboratory(MicroLAB),
+National Technical University of Athens(NTUA)
+(http://www.microlab.ntua.gr/)
+and
+Erasmus Medical Center Rotterdam (EMC)
+(http://www.erasmusmc.nl/?lang=en)
+
+For questions regarding this project, contact
+George Chatzikonstantis, e-mail at:
+georgec@microlab.ntua.gr

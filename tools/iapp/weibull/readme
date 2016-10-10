@@ -1,0 +1,31 @@
+Brief description:
+
+The executable generated from source code in create_stim.c generates a file detailing input current for each cell in each step of an InfOli simulation.
+It uses a Weibull distribution to determine when current is actually fed to a cell at 6μA, else its input current is 0.
+The user specifies the mean time between current feed for every cell (and the resulting voltage spike) as well as the length of such current feed (spike width). The user finally specifies the duration of the desired experiment.
+The resulting file contains one input current value for each cell of the network in each line and is comprised of as many lines as the steps in the experiment.
+If the user needs to match 2D coordinates [x,y]  with the 1D output [cellID] of the executable, they can use the followingsimple formula: cellId = x*NetworkDimension2 + y.
+
+Input:
+
+1) Cellular Network Dimension 1
+2) Cellular Network Dimension 2
+3) Mean Time To Fire (MTTF) in ms
+4) Spike Width in ms
+5) Experiment Total Duration in ms
+
+Output:
+
+1) Input Current File named inputCurrent.txt
+2) A report detailing #spikes fired named stimulusReport.txt.
+
+Examples:
+
+Compiling)
+[georgec@phaethon weibull]$ gcc create_stim.c -O3 -lm -o stim_generator.x
+
+Executing)
+[georgec@phaethon weibull]$ ./stim_generator.x
+Error!
+Usage: ./stim_generator.x network_X network_Y MTTF_in_ms spike_width experiment_duration_in_ms.
+[georgec@phaethon weibull]$ ./stim_generator.x 5 5 1000 25 10000
