@@ -17,7 +17,7 @@ mv connectivity/3d_synapse_count/conn_generator.x ~/infoli/run/input
 
 # prep input: copy runtime lib to input
 cd ~/infoli/run
-cp runtime_libs/phaethon/libiomp5.so input
+cp runtime_libs/microlab/phaethon/libiomp5.so input
 
 # copy necessities to the mic
 export tag=$RANDOM
@@ -26,7 +26,7 @@ cd ~/infoli/run/input
 scp infoli.x libiomp5.so $MICNAME:~/experiment$tag
 
 # preparations complete, conduct the experiment
-cd ~/infoli/workspace/input
+cd ~/infoli/run/input
 
 for size in 1000 2000 5000 10000
 do
