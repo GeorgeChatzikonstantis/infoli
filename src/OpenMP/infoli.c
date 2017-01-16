@@ -354,7 +354,6 @@ int main(int argc, char *argv[]){
 	 * is now complete
 	 */
 
-printf("%d %d\n", cellParamsPtr.total_amount_of_neighbours[0], cellParamsPtr.total_amount_of_neighbours[1]);
 	}
 	if (PRINTING) {
 		for (i=0;i<cellCount;i++) {
