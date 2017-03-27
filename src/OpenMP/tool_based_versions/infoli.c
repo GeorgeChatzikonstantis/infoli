@@ -33,12 +33,11 @@
 #include <math.h>
 #include <sys/time.h>
 #include <time.h>
-#include "infoli_integrated.h"
+#include "infoli.h"
 #include <omp.h>
 
 int core_id, cores, cellCount;
 int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
-float CONN_PROBABILITY;
 struct timeval tic, toc, intime;
 
 void subtract_and_add (struct timeval *Z,struct timeval*x,struct timeval *y) {
@@ -123,10 +122,10 @@ int main(int argc, char *argv[]){
 	 * for each cell on each step
   	 */
 	
-	if(argc == 4) {
+	if(argc == 2) {
 		inputFromFile = 0;
 	}
-	else if(argc == 5) {
+	else if(argc == 3) {
 		inputFromFile = 1;
 		inFileName = argv[2];
 		pInFile = fopen(inFileName,"r");
@@ -137,20 +136,19 @@ int main(int argc, char *argv[]){
 		iAppArray= (mod_prec*) _mm_malloc(cellCount*(sizeof(mod_prec)), 64);
 	}	
 	else {
-		printf("Error: Too many arguments.\nUsage: ./InferiorOlive <#nrns> <density ([0,1])> <simtime>\nor ./InferiorOlive <#nrns> <density ([0,1])> <simtime> <stimulus_file>\n");
+		printf("Error: Too many arguments.\nUsage: ./InferiorOlive <dim1> <dim2> <Iapp_input_file> or ./InferiorOlive <dim1> <dim2>\n");
 		exit(EXIT_FAILURE);
 	}
 
 	/* outFileName is file for output
-	 */
+	*/
         sprintf(outFileName,"InferiorOlive_Output.txt");
-        
+	sprintf(conFile,"cellConnections.txt");
+
         IO_NETWORK_SIZE = atoi(argv[1]);
-        CONN_PROBABILITY = atof(argv[2]);
-        simTime = atof(argv[3]);
 
         /* compute how many grid cells 
-	 * are assigned to each core
+	* are assigned to each core
 	*/
 
         cellCount= IO_NETWORK_SIZE;
@@ -165,7 +163,15 @@ int main(int argc, char *argv[]){
 			printf("Error: Couldn't create %s\n", outFileName);
 			exit(EXIT_FAILURE);
 		}
+		sprintf(tempbuf, "#simSteps Time(ms) Input(Iapp) Output(V_axon)");
+		fputs(tempbuf, pOutFile);
 	}
+
+	pConFile = fopen(conFile, "r");
+        if(pConFile==NULL){
+                printf("Error: Couldn't create %s\n", conFile);
+                exit(EXIT_FAILURE);
+        }
 
 	/* Channel declaration and mem allocation 
 	 * 
@@ -251,71 +257,103 @@ int main(int argc, char *argv[]){
 		exit(EXIT_FAILURE);
 	}
 
-	mod_prec cond_value= 0.04;	//default value for conductance in synapses (microSiemens)
+	mod_prec cond_value= 0;
 
-	/* we shall generate a connectivity map
-	 * based on the probability given by the user
-	 */
+	if (COMPRESSED_MAP==0) { //non-sparse matrix format for conn. matrix
+		int line_counter;
 
-	int sender_cell, receiver_cell;
-	int* conn_gen_buffer=(int*) calloc(sizeof(int), IO_NETWORK_SIZE);	//temp buffer for storing bonds
-	float rndm;
-
-	/* we generate rng checks against the probability
-	 * supplied by the user to calculate connection counts
- 	 * We store the results of each rng check in a temp buffer
- 	 * After we are done, we allocate memory for dendritic data structs
- 	 * and fill it with neighbour (bonds) ids
+	/* initial passing of the connections file
+ 	 * necessary to calculate connection counts
  	 */
 
-	srand ( time(NULL) );
-	for (receiver_cell=0; receiver_cell<IO_NETWORK_SIZE; receiver_cell++) {
+		for (line_counter=0;line_counter<IO_NETWORK_SIZE;line_counter++) {
+			for (i=0; i<IO_NETWORK_SIZE; i++) {
 
-		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
+				fscanf(pConFile, "%f ", &cond_value);
+				if (cond_value < 0.0000001)
+					;		//this connection is considered not existing if conductance value is too small
+				else
+					cellParamsPtr.total_amount_of_neighbours[i]++;
 
-			if (sender_cell == receiver_cell)
-				;		//no self-feeding connections allowed
-			else {
-				rndm = ((float) rand()) / ((float) RAND_MAX);	//generate rng and compare to probability
-				if (rndm <= CONN_PROBABILITY)
-					cellParamsPtr.total_amount_of_neighbours[receiver_cell]++;  //increase neighbour count
-					conn_gen_buffer[sender_cell]++;	//mark that we formed a bond with this cell
 			}
 		}
 
-		//allocate enough space now that we know how many neighbours this receiving cell has
-		cellParamsPtr.neighConductances[receiver_cell] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(mod_prec), 64);
-		cellParamsPtr.neighId[receiver_cell] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(int), 64);
-
-		//run through the temporary buffer and fill the data structs with the bonds' info
-		i=0;	//this temporary variable will help fill the data structs
-		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
-			if (conn_gen_buffer[sender_cell]==0)
-				;	//skip this cell, it is not a bond
-			else {
-				cellParamsPtr.neighConductances[receiver_cell][i]=cond_value;
-				cellParamsPtr.neighId[receiver_cell][i]=sender_cell;
-				i++;
-			}
-			if (i>cellParamsPtr.total_amount_of_neighbours[receiver_cell])
-				break;
+		for (i=0; i<IO_NETWORK_SIZE; i++) {
+			cellParamsPtr.neighConductances[i] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[i]*sizeof(mod_prec), 64);
+			cellParamsPtr.neighId[i] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[i]*sizeof(int), 64);
+			//we reset the amount of neighbours to re-use it in the next segment
+			cellParamsPtr.total_amount_of_neighbours[i] = 0;
 		}
 
-		//reset the buffer for the next receiver cell
-		memset(conn_gen_buffer, 0, IO_NETWORK_SIZE*sizeof(int));
-	}
+	/* now the file is re-processed to plan out the
+ 	 * mapping of the connections
+ 	 */
 
-	/* connections mapping
+		rewind(pConFile);
+		for (line_counter=0;line_counter<IO_NETWORK_SIZE;line_counter++) {
+			for (i=0; i<IO_NETWORK_SIZE; i++) {
+
+				fscanf(pConFile, "%f ", &cond_value);
+				if (cond_value < 0.0000001)
+					;
+				else {
+					cellParamsPtr.neighId[i][cellParamsPtr.total_amount_of_neighbours[i]] = line_counter; //which cell sends this voltage to us
+					cellParamsPtr.neighConductances[i][cellParamsPtr.total_amount_of_neighbours[i]] = cond_value;	//what conductance we use to calculate its impact
+					cellParamsPtr.total_amount_of_neighbours[i]++;
+				}
+			}
+		}
+
+	/* connections mapping for non-sparse matrix format
  	 * is now complete
  	 */
 
+	}
+	else {	//sparse-matrix format for conn. matrix
+		char c = fpeek(pConFile);
+		int send_cell, rec_cell;
 
-	//Initialize output file IF enabled
+		while (c!=EOF) {
+
+			c = fpeek(pConFile);
+			if (c==EOF)
+				break;
+			fscanf(pConFile, "%d %d %f\n", &send_cell, &rec_cell, &cond_value);
+			if (cond_value < 0.0000001)
+				;
+			else
+				cellParamsPtr.total_amount_of_neighbours[rec_cell]++;
+		}
+		for (i=0; i<IO_NETWORK_SIZE; i++) {
+			cellParamsPtr.neighConductances[i] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[i]*sizeof(mod_prec), 64);
+			cellParamsPtr.neighId[i] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[i]*sizeof(int), 64);
+			cellParamsPtr.total_amount_of_neighbours[i] = 0;
+		}
+
+		rewind(pConFile);
+		c = 'a';
+
+		while (c!=EOF) {
+
+			c = fpeek(pConFile);
+			if (c==EOF)
+				break;
+			fscanf(pConFile, "%d %d %f\n", &send_cell, &rec_cell, &cond_value);
+			if (cond_value < 0.0000001)                     //this connection is considered not existing if conductance value is too small
+				;
+			else {
+				cellParamsPtr.neighId[rec_cell][cellParamsPtr.total_amount_of_neighbours[rec_cell]] = send_cell;
+				cellParamsPtr.neighConductances[rec_cell][cellParamsPtr.total_amount_of_neighbours[rec_cell]] = cond_value;
+				cellParamsPtr.total_amount_of_neighbours[rec_cell]++;
+			}
+		}
+
+	/* connections mapping for sparse matrix format
+	 * is now complete
+	 */
+
+	}
 	if (PRINTING) {
-		sprintf(tempbuf, "Execution Time for Simulation in ms:              \n");
-		fputs(tempbuf, pOutFile);
-		sprintf(tempbuf, "#simSteps Input(Iapp) Output(V_axon)");
-                fputs(tempbuf, pOutFile);
 		for (i=0;i<cellCount;i++) {
 			sprintf(tempbuf, "%d ", cellID[i]);
 			fputs(tempbuf, pOutFile);
@@ -353,7 +391,7 @@ int main(int argc, char *argv[]){
 	/* start of the simulation
 	 * In case we want to read the stimulus from file inputFromFile = true
 	 */
-	gettimeofday(&tic, NULL);
+
 
 	/* 	WARNING, recent changes have made inputFromFile currently unusable-
  	 *  	related code will be commented out until fixed and commited
@@ -403,7 +441,8 @@ int main(int argc, char *argv[]){
 		
 	}
 	else {	
-*/		total_simulation_steps = (int)(simTime/DELTA);
+*/		simTime = SIMTIME; 
+		total_simulation_steps = (int)(simTime/DELTA);
 
 		for(simStep=0;simStep<total_simulation_steps;simStep++) {
 								
@@ -602,18 +641,17 @@ int main(int argc, char *argv[]){
 				V_axon[target_cell] = DELTA * dVa_dt + V_axon[target_cell];
 
 //				~END OF COMPUTATIONS~
+
+/*				This I/O part is commented out because it ruins vectorization
  
-			}
-
-
-			if (PRINTING&&((simStep%100)==0)) {
-
-			#pragma omp parallel for simd shared (V_axon, pOutFile) private(target_cell, tempbuf)
-				for (target_cell=0;target_cell<cellCount;target_cell++) {
+				if (PRINTING) {
 					sprintf(tempbuf, "%d : %.8f ", target_cell+1, V_axon[target_cell]);
 					fputs(tempbuf, pOutFile);
 				}
 
+*/			}
+
+			if (PRINTING) {
 				sprintf(tempbuf, "\n");
 				fputs(tempbuf, pOutFile);
 			}
@@ -621,11 +659,8 @@ int main(int argc, char *argv[]){
 		}
 
 //	}
-
-	gettimeofday(&toc, NULL);
 		
-	/* SIM END
-	 * Free  memory and close files
+	/* Free  memory and close files
 	 */
 
 	if (PRINTING) {
@@ -635,20 +670,6 @@ int main(int argc, char *argv[]){
 
 	if(inputFromFile)
 		fclose (pInFile);
-
-	/* Execution Time for the Sim
-	 */
-
-	printf("Execution Time for Simulation: %0.2f ms.\n", ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
-		(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
-	if (PRINTING) {
-		pOutFile = fopen (outFileName, "rb+");
-		sprintf(tempbuf, "Execution Time for Simulation in ms: %0.2f\n", \
-			((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
-			(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
-                fputs(tempbuf, pOutFile);
-		fclose (pOutFile);
-	}
 
 	return 0;
 }

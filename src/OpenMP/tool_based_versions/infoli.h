@@ -24,10 +24,12 @@
 #define MAIN_H_
 /*** MACROS ***/
 #define RAND_INIT 0 // make it zero to facilitate debugging , 0 for debugging / 1 for random states
+#define COMPRESSED_MAP 1  // a flag denoting whether the connectivity map fed to the simulator is in sparse matrix compression form, 0 for false 1 for true
+#define SIMTIME 5000  // in ms, for when no input file is provided , time in msec when you do not have an input file
 
 //IO network size is IO_NETWORK_DIM1*IO_NETWORK_DIM2
 #define IAPP_MAX_CHARS 6 //	2 integer, the dot, 2 decimals and the delimiter 
-#define PRINTING 1	 //	flag enabling or disabling output , axon's voltage is the output at every step
+#define PRINTING 0	 //	flag enabling or disabling output , axon's voltage is the output at every step
 #define G_CAL_FROM_FILE 0		//	flag enabling or disabling user defined initial settings of gcal
 
 

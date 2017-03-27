@@ -21,13 +21,19 @@ OpenMP coding paradigm.
 /tools holds generators for input to the InfOli simulator.
 A connectivity matrix (/connectivity) is imperative for
 any simulation, while an applied current (/iapp) is optional.
+The connectivity matrix is *normally* supplied by the tools
+contained in this folder, however the OpenMP version also
+contains a version with a built-in matrix generator. The
+built-in version is considered as the default of the codebase.
 Example of usage: make pct, compiles a connectivity matrix
 generator that is based around fixed percentages of network
 density.
 
-/scripts holds queuing and bash scripts. This folder is
-mostly useful when using the simulator on one of the
-supercomputing clusters that it has been tested on. One
+/scripts holds queuing and bash scripts. Sample scripts
+for compiling and using the OpenMP version of the code on
+an x86-based architecture and a Phi-KNC card are supplied.
+The folder also contains scripts for executing the simulator
+on supercomputing clusters that it has been tested on. One
 particular example is the STFC Hartree Center idataplex
 cluster. For this particular cluster, a sample script for
 each programming "flavour" of the simulator is given.
