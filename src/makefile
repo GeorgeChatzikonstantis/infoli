@@ -31,7 +31,7 @@ HYBRID_FLAGS= -mt_mpi -openmp
 # subdirectories
 MPI_DIR= MPI/
 OMP_DIR= OpenMP/
-HYBRID_DIR= Hybrid/
+HYBRID_DIR= Hybrid_New/
 VER_DIR= VersionVerification/
 
 # --- TARGETS

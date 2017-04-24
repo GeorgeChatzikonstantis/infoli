@@ -1,8 +1,8 @@
 #BSUB -J georgecjob
-#BSUB -o /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/output/georgecjob.out
-#BSUB -e /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/output/georgecjob.err
+#BSUB -o /gpfs/stfc/local/HCEEC005/nnm17/gxc30-nnm17/InfOliFull/run/output/georgecjob.out
+#BSUB -e /gpfs/stfc/local/HCEEC005/nnm17/gxc30-nnm17/InfOliFull/run/output/georgecjob.err
 #BSUB -R "span[ptile=24]"
-#BSUB -W 6:00
+#BSUB -W 24:00
 #BSUB -n 1
 #BSUB -q phiq
 
@@ -12,21 +12,21 @@ module purge
 module load intel_mpi/5.0.3 intel/15.2.164 intel_vtune
 
 # prepare experiment: clean up the working room
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run
+cd ~/InfOliFull/run
 rm -rf input/*
 
 # prep input: compiling executable
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/src
+cd ~/InfOliFull/src
 make omp_xeon
-mv OpenMP/infoli.x /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input
+mv OpenMP/infoli.x ~/InfOliFull/run/input
 
 # prep input: compile desired connectivity generator
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/tools
+cd ~/InfOliFull/tools
 make count
-mv connectivity/3d_synapse_count/conn_generator.x /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input
+mv connectivity/3d_synapse_count/conn_generator.x ~/InfOliFull/run/input
 
 # prep input: copy runtime lib to input
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/
+cd ~/InfOliFull/run/
 cp runtime_libs/hartree/libiomp5.so input
 
 # specify how threads will be placed and topology
@@ -34,7 +34,7 @@ export KMP_AFFINITY=balanced
 export KMP_PLACE_THREADS=20c,1t
 
 # preparations complete, specify how threads will be placed and conduct the experiment
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input
+cd ~/InfOliFull/run/input
 for size in 500000
 do
 

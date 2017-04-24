@@ -33,10 +33,11 @@
 #include <math.h>
 #include <sys/time.h>
 #include <time.h>
-#include "infoli.h"
+#include <mpi.h>
 #include <omp.h>
+#include "infoli.h"
 
-int core_id, cores, cellCount;
+int core_id, cores, cellCount, core_offset;
 int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
 float CONN_PROBABILITY;
 struct timeval tic, toc, intime;
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]){
 	 * necessary for program flow
 	 */
 
-	int i=0, j, k=0, line_count,l, p, q, x, y, targetCore;
+	int i=0, j, k=0, line_count,l, p, q, x, y, targetCore, global_cell_id;
 	char c;
 	char *inFileName;
 	char outFileName[100];
@@ -88,7 +89,8 @@ int main(int argc, char *argv[]){
 	mod_prec *gcal;
 	int *init_steps;
 	long double seconds;
-	int simulation_array_ID,target_cell, requested_neighbour;
+	int simulation_array_ID,target_cell, local_cell, requested_neighbour;
+	int package_index, coded_package_index, decoded_package_index;
 
 	cellCompParams cellParamsPtr;
 
@@ -115,6 +117,12 @@ int main(int argc, char *argv[]){
 
 	/* end of declarations
 	 */ 
+
+	MPI_Init(&argc, &argv);
+	MPI_Comm_rank(MPI_COMM_WORLD, &core_id);
+	MPI_Comm_size(MPI_COMM_WORLD, &cores);
+	MPI_Request* s_request = (MPI_Request*) malloc(cores*sizeof(MPI_Request));      //array of request handles for MPI_Isend, one for each core in the network
+	MPI_Request* r_request = (MPI_Request*) malloc(cores*sizeof(MPI_Request));      //array of request handles for MPI_Irecv, one for each core in the network
 
 	/* Process command line arguments
 	 * Case argc = 3 then a one-pulse input is stimulated.
@@ -143,7 +151,7 @@ int main(int argc, char *argv[]){
 
 	/* outFileName is file for output
 	 */
-        sprintf(outFileName,"InferiorOlive_Output.txt");
+        sprintf(outFileName,"InferiorOlive_Output%d.txt", core_id);
         
         IO_NETWORK_SIZE = atoi(argv[1]);
         CONN_PROBABILITY = atof(argv[2]);
@@ -153,7 +161,15 @@ int main(int argc, char *argv[]){
 	 * are assigned to each core
 	*/
 
-        cellCount= IO_NETWORK_SIZE;
+        cellCount= IO_NETWORK_SIZE/cores;
+
+	/* compute offset each core applies
+	 * to its assigned (local) cells
+	 * in order to calculate a cell id
+	 * relevant to the entire (global) network
+	 */
+
+	core_offset = core_id*cellCount;
 
 	/* PRINTING is true in case we want to write the
 	 * output to a specified file (outFileName)
@@ -255,10 +271,12 @@ int main(int argc, char *argv[]){
 
 	/* we shall generate a connectivity map
 	 * based on the probability given by the user
+	 * Note that this map handles the core's cells
+	 * connections to the entire network
 	 */
 
 	int sender_cell, receiver_cell;
-	int* conn_gen_buffer=(int*) calloc(sizeof(int), IO_NETWORK_SIZE);	//temp buffer for storing bonds
+	int* conn_gen_buffer=(int*) calloc(IO_NETWORK_SIZE, sizeof(int));	//temp buffer for storing bonds
 	float rndm;
 
 	/* we generate rng checks against the probability
@@ -268,18 +286,22 @@ int main(int argc, char *argv[]){
  	 * and fill it with neighbour (bonds) ids
  	 */
 
-	srand ( time(NULL) );
-	for (receiver_cell=0; receiver_cell<IO_NETWORK_SIZE; receiver_cell++) {
+	srand ( time(NULL) + core_id );
+	short* cellsNeeded = (short*) calloc(IO_NETWORK_SIZE, sizeof(short));	//buffer marking cells in other cores necessary to this core
 
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
+		global_cell_id = receiver_cell + core_offset;
 		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
 
-			if (sender_cell == receiver_cell)
+			if (sender_cell == global_cell_id)
 				;		//no self-feeding connections allowed
 			else {
 				rndm = ((float) rand()) / ((float) RAND_MAX);	//generate rng and compare to probability
 				if (rndm <= CONN_PROBABILITY) {
 					cellParamsPtr.total_amount_of_neighbours[receiver_cell]++;  //increase neighbour count
 					conn_gen_buffer[sender_cell]++;	//mark that we formed a bond with this cell
+					if ((sender_cell/cellCount)!=core_id) //if this cell does not belong to core
+						cellsNeeded[sender_cell]  = 1; //mark it
 				}
 			}
 		}
@@ -306,10 +328,202 @@ int main(int argc, char *argv[]){
 		memset(conn_gen_buffer, 0, IO_NETWORK_SIZE*sizeof(int));
 	}
 
+	printf("%d: ", core_id);
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
+		printf("| %d | ", receiver_cell);
+		for (i=0; i<cellParamsPtr.total_amount_of_neighbours[receiver_cell]; i++)
+			printf("%d ", cellParamsPtr.neighId[receiver_cell][i]);
+	}
+	printf("\n");
+
 	/* connections mapping
+	 * for the core's cells
+	 * to the entire network
  	 * is now complete
  	 */
 
+	/* cores will exchange knowledge
+	 * of each sub-network's connections
+	 * in order to sync the sub-network's
+	 * connectivity needs
+	 *
+ 	 * scatter the cellsNeeded matrix
+	 * so that other cores know which cells are needed
+	 */
+
+	short** cellsToSend = (short**) malloc(cores*sizeof(short*));
+	for (i=0; i<cores; i++) {
+		cellsToSend[i] = (short*) malloc(cellCount*sizeof(short));
+		MPI_Scatter(cellsNeeded, cellCount, MPI_SHORT, cellsToSend[i], cellCount, MPI_SHORT, i, MPI_COMM_WORLD);
+	}
+
+	/* process received matrix so that the number of cells
+	 * necessary for exchanging per core is known
+	 */
+
+	int* packagesToSend = (int*) calloc(cores, sizeof(int));
+	for (i=0; i<cores; i++) {
+		for (j=0; j<cellCount; j++) {
+			if (cellsToSend[i][j] > 0)
+				packagesToSend[i]++;
+		}
+	}
+	packagesToSend[core_id]=0;	//no need for packages to same-core
+	int* packagesToReceive = (int*) calloc(cores, sizeof(int));
+	for (i=0; i<cores; i++) {
+		MPI_Scatter(packagesToSend, 1, MPI_INT, &packagesToReceive[i], 1, MPI_INT, i, MPI_COMM_WORLD);
+	}
+
+	/* notify the other cores the (global) indexes
+	 * of each cells that they will be receiving
+	 */
+	int** packagesIndexToSend = (int**) malloc(cores*sizeof(int*));
+	for (i=0; i<cores; i++) {
+		packagesIndexToSend[i] = (int*) calloc(packagesToSend[i], sizeof(int));
+		k=0;
+		for (j=0; j<cellCount; j++) {
+			global_cell_id = j + core_offset;
+			if (cellsToSend[i][j] > 0) {
+				packagesIndexToSend[i][k] = global_cell_id;
+				k++;
+			}
+			if (k>(packagesToSend-1))
+				break;
+		}
+	}
+	int** packagesIndexToReceive = (int**) malloc(cores*sizeof(int*));
+	for (i=0; i<cores; i++) {
+		packagesIndexToReceive[i] = (int*) calloc(packagesToReceive[i], sizeof(int));
+		if (i!=core_id) {
+			MPI_Isend(packagesIndexToSend[i], packagesToSend[i], MPI_INT, i, 0, MPI_COMM_WORLD, &s_request[i]);
+			MPI_Irecv(packagesIndexToReceive[i], packagesToReceive[i], MPI_INT, i, 0, MPI_COMM_WORLD, &r_request[i]);
+		} else {
+			r_request[i]= MPI_REQUEST_NULL;
+		}
+	}
+
+	/* create buffers that will send and hold
+	 * the respective voltages in each sim step
+	 */
+
+	mod_prec** packagesVoltToSend = (mod_prec**) _mm_malloc(cores*sizeof(mod_prec*), 64);
+	for (i=0; i<cores; i++)
+		packagesVoltToSend[i] = (mod_prec*) _mm_malloc(packagesToSend[i]*sizeof(mod_prec), 64);
+	mod_prec** packagesVoltToReceive = (mod_prec**) _mm_malloc(cores*sizeof(mod_prec*), 64);
+	for (i=0; i<cores; i++) {
+		if (i==core_id)
+			packagesVoltToReceive[i] = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+		else
+			packagesVoltToReceive[i] = (mod_prec*) _mm_malloc(packagesToReceive[i]*sizeof(mod_prec), 64);
+	}
+
+	/* sync asynchronous calls to ensure
+	 * core syncing
+	 */
+	syncing(r_request);
+	cleanup_requests(r_request);
+
+	printf("%d: ", core_id);
+        for (i=0; i<cores; i++) {
+                printf("| %d <-  | ", i);
+                for (j=0; j<packagesToReceive[i]; j++)
+                        printf("%d ", packagesIndexToReceive[i][j]);
+        }
+        printf("\n");
+
+
+	/* free up memory structs not necessary
+	 * anymore (simulation body only needs
+	 * the packages data structs)
+	 */
+	for (i=0;i<cores;i++)
+		free(cellsToSend[i]);
+	free(cellsToSend);
+	free(cellsNeeded);
+
+	/* create a secondary struct
+	 * which allows the core's cells
+	 * to know the location (index) of their
+	 * connections' data in each of the
+	 * received packages from other cores.
+	 * This index matching allows
+	 * skipping parses of the received 
+	 * packages, accelerating post-communication
+	 * processing but increasing memory footprint
+	 * The index will be "codified" in a way that allows
+	 * its value to indicate both  which package to look
+	 * for (i.e. which core it came from) and the
+	 * exact position within the package (i.e. index)
+	 */
+
+	int** packagesIndexMatcher = (int**) _mm_malloc(cellCount*sizeof(int*), 64);
+	int packageNumber;	//which package to match index with, corresponds to which core sent the package
+	int packageIndex;	//which index of the package we are currently examinating
+	int neighbour;		//which connection of the receiver cell we are trying to match
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) { 
+		packagesIndexMatcher[receiver_cell] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(int), 64);
+		packageNumber=0;
+		packageIndex=0;
+		neighbour=0;
+
+		while ((packageNumber<cores)&&(neighbour<cellParamsPtr.total_amount_of_neighbours[receiver_cell])) {
+
+			packagesIndexMatcher[receiver_cell][neighbour]=-1;
+
+			if (packageNumber==core_id) {
+				packageNumber++;
+				if (!(packageNumber<cores))
+					break;
+				packageIndex=0;
+			}
+			
+			if ((cellParamsPtr.neighId[receiver_cell][neighbour]/cellCount)==core_id) {
+				local_cell=cellParamsPtr.neighId[receiver_cell][neighbour];
+				packagesIndexMatcher[receiver_cell][neighbour]=local_cell;
+				neighbour++;
+			} else {
+
+				if (cellParamsPtr.neighId[receiver_cell][neighbour]==packagesIndexToReceive[packageNumber][packageIndex]) {
+					packagesIndexMatcher[receiver_cell][neighbour]=packageIndex+packageNumber*cellCount;
+					neighbour++;
+				}
+
+				packageIndex++;
+				if (packageIndex>(packagesToReceive[packageNumber]-1)) {
+					packageNumber++;
+					packageIndex=0;
+				}
+			}
+
+		}
+
+		while (neighbour<cellParamsPtr.total_amount_of_neighbours[receiver_cell]) {
+
+			packagesIndexMatcher[receiver_cell][neighbour]=-1;
+			if ((cellParamsPtr.neighId[receiver_cell][neighbour]/cellCount)==core_id) {
+				local_cell=cellParamsPtr.neighId[receiver_cell][neighbour];
+				packagesIndexMatcher[receiver_cell][neighbour]=local_cell;
+			}
+			neighbour++;
+		}
+
+	}
+
+
+	/* cores are now up-to-date with
+	 * each other's communicational needs.
+	 * Communication for main simulation
+	 * body is properly set up
+	 */
+if (core_id==2) {
+	printf("%d: ", core_id);
+	for (i=0; i<cellCount; i++) {
+		printf(": %d : ", i);
+		for (j=0; j<cellParamsPtr.total_amount_of_neighbours[i]; j++)
+			printf("%d ", packagesIndexMatcher[i][j]);
+	}
+	printf("\n");
+}
 
 	//Initialize output file IF enabled
 	if (PRINTING) {
@@ -418,11 +632,40 @@ int main(int argc, char *argv[]){
 				fputs(tempbuf, pOutFile);
 			}
 
+
+	/* 	We shall perform core-communication to exchange voltage packages
+	 * 	We first fill the voltage-buffer needed to be sent over
+	 */ 
+
+			for (targetCore=0; targetCore<cores; targetCore++) {
+				if (targetCore==core_id) {
+					//fill the receiving Voltage buffer with our updated local cells
+					memcpy(packagesVoltToReceive[core_id], V_dend, cellCount*sizeof(mod_prec));
+					r_request[targetCore]=MPI_REQUEST_NULL;
+				} else {
+					for (package_index=0; package_index<packagesToSend[targetCore]; package_index++) {
+						requested_neighbour = packagesIndexToSend[targetCore][package_index]-core_offset;
+						packagesVoltToSend[targetCore][package_index] = V_dend[requested_neighbour];
+					}
+
+	/*	We then call MPI functions for sending the voltage-buffer and receiving
+	 *	our respective voltage-buffer
+	 */
+					if (packagesToSend[targetCore]>0)
+						MPI_Isend(packagesVoltToSend[targetCore], packagesToSend[targetCore], MPI_FLOAT, targetCore, 0, MPI_COMM_WORLD, &s_request[targetCore]);
+					if (packagesToReceive[targetCore]>0)
+						MPI_Irecv(packagesVoltToReceive[targetCore], packagesToReceive[targetCore], MPI_FLOAT, targetCore, 0, MPI_COMM_WORLD, &r_request[targetCore]);
+				}
+			}
+			syncing(r_request);
+			cleanup_requests(r_request);
+
 	/*	First Loop takes care of Gap Junction Functions
  	*/			
 
-		#pragma omp parallel for shared (cellParamsPtr, iApp, iAppIn, V_dend, I_c, pOutFile) private(target_cell, i, \
-		requested_neighbour, f, V, voltage, I_c_storage) firstprivate(simulation_array_ID)
+		#pragma omp parallel for shared (cellParamsPtr, packagesIndexMatcher, packagesVoltToReceive, iApp, iAppIn, V_dend, I_c, \
+		pOutFile) private(target_cell, i, requested_neighbour, targetCore, f, V, coded_package_index, decoded_package_index, \
+		voltage, I_c_storage) firstprivate(simulation_array_ID)
 			for (target_cell=0;target_cell<cellCount;target_cell++) {
 
 				//Feeding of Input Current
@@ -433,13 +676,20 @@ int main(int argc, char *argv[]){
  	*/
 
 				I_c_storage = 0;
-				__assume_aligned(cellParamsPtr.neighId[target_cell], 64);
 				__assume_aligned(cellParamsPtr.neighConductances[target_cell], 64);
 				__assume_aligned(V_dend, 64);
+				__assume_aligned(packagesIndexMatcher[target_cell], 64);
 			#pragma ivdep
 				for (i=0; i<cellParamsPtr.total_amount_of_neighbours[target_cell]; i++){
-					requested_neighbour = cellParamsPtr.neighId[target_cell][i];
-					voltage = V_dend[requested_neighbour];
+					//get the codified index of the cell's neighbour
+					coded_package_index = packagesIndexMatcher[target_cell][i];
+					//decode the package (core) you need to read
+					targetCore = coded_package_index/cellCount;
+					//decode the index of the package-to-read
+					decoded_package_index = coded_package_index%cellCount;
+					//search the neighbour's voltage in the receiving voltage buffer
+					voltage = packagesVoltToReceive[targetCore][decoded_package_index];
+					//compute neighbour's incoming current
 					V = V_dend[target_cell] - voltage;
 					f = 0.8f * expf(-1*powf(V, 2)/100) + 0.2f;// SCHWEIGHOFER 2004 VERSION
 					I_c_storage += cellParamsPtr.neighConductances[target_cell][i] * f * V;
@@ -607,7 +857,7 @@ int main(int argc, char *argv[]){
 			}
 
 
-			if (PRINTING&&((simStep%100)==0)) {
+			if (PRINTING&&((simStep%1)==0)) {
 
 			#pragma omp parallel for simd shared (V_axon, pOutFile) private(target_cell, tempbuf)
 				for (target_cell=0;target_cell<cellCount;target_cell++) {
@@ -651,6 +901,7 @@ int main(int argc, char *argv[]){
 		fclose (pOutFile);
 	}
 
+	MPI_Finalize();
 	return 0;
 }
 
@@ -724,4 +975,49 @@ void read_g_CaL_from_file(mod_prec* g_cal) {
 inline mod_prec min(mod_prec a, mod_prec b){
 
 	return (a < b) ? a : b;
+}
+
+void syncing(MPI_Request* request) {
+
+/* a function that first makes sure all requests passed on to it are completed
+ * and then calls an MPI_Barrier to make sure all processes are in sync. We expect
+ * one request from each core employed by the app
+ */
+
+        int i, done = 0, flag, no_of_reqs = cores;
+
+        while (!done) {
+                done = 1;
+                for (i=0;i<no_of_reqs;i++) {
+                        if (request[i] == MPI_REQUEST_NULL)
+                                ;
+                        else {
+                                MPI_Test(&(request[i]), &flag, MPI_STATUS_IGNORE);
+                                if (!flag)
+                                        done = 0;
+                        }
+                }
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        return;
+
+}
+
+void cleanup_requests(MPI_Request* request) {
+
+/* a function that makes sure the resources used up by the mpi communication phase
+ * are cleaned up properly
+ */
+
+        int i, no_of_reqs = cores;
+
+        for (i=0; i< no_of_reqs; i++) {
+                if (request[i] == MPI_REQUEST_NULL)
+                        ;
+                else
+                        MPI_Request_free(&request[i]);
+        }
+        return;
+
 }

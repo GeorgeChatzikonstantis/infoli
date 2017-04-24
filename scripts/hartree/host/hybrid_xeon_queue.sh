@@ -1,6 +1,6 @@
 #BSUB -J georgecjob
-#BSUB -o /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/output/georgecjob.out
-#BSUB -e /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/output/georgecjob.err
+#BSUB -o /gpfs/stfc/local/HCEEC005/nnm17/gxc30-nnm17/InfOliFull/run/output/georgecjob.out
+#BSUB -e /gpfs/stfc/local/HCEEC005/nnm17/gxc30-nnm17/InfOliFull/run/output/georgecjob.err
 #BSUB -R "span[ptile=24]"
 #BSUB -W 6:00
 #BSUB -n 24
@@ -30,65 +30,38 @@ export LD_LIBRARY_PATH=/gpfs/stfc/local/apps/intel/intel_cs/2015.1.133/composer_
 /gpfs/stfc/local/apps/intel/intel_mpi/5.0.2.044/intel64/lib:$LD_LIBRARY_PATH;
 
 # prepare experiment: clean up the working room
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/
+cd ~/InfOliFull/run/
 rm -rf input/*
 
 # prep input: compiling executable
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/src
+cd ~/InfOliFull/src
 make hybrid_xeon
-mv Hybrid/infoli.x /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input
-
-# prep input: compile desired connectivity generator
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/tools
-make count
-mv connectivity/3d_synapse_count/conn_generator.x /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input
+mv Hybrid_New/infoli.x ~/InfOliFull/run/input
 
 # prep input: copy runtime lib to input
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/ 
+cd ~/InfOliFull/run/ 
 cp runtime_libs/hartree/libiomp5.so input
 
 # specify vtune analysis type
 export analysis_type="general-exploration"
 
 # preparations complete, conduct the experiment
-cd /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input
-for size in 10000
+cd ~/InfOliFull/run/input
+ls
+for size in 8
 do
-
-	for synapses in 10 20 50 100 200 500 1000
+	for pct in 1
 	do
 
-		./conn_generator.x $((size/100)) 10 10 $synapses 1
-		export MYJOB="/gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input/infoli.x $size"
-
-		export OMP_NUM_THREADS=20
-		export vtuneCommand="amplxe-cl -c $analysis_type -result-dir vtune_report1_$size --target-install-dir=/gpfs/stfc/local/apps/intel/intel_cs/vtune_amplifier_xe_2015 --"
-#		$vtuneCommand mpirun -np 1 -genvall ${MYJOB}
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np 1 -genvall ${MYJOB}
-
-		export OMP_NUM_THREADS=10
-		export vtuneCommand="amplxe-cl -c $analysis_type -result-dir vtune_report2_$size --target-install-dir=/gpfs/stfc/local/apps/intel/intel_cs/vtune_amplifier_xe_2015 --"
-#		$vtuneCommand mpirun -np 2 -genvall ${MYJOB}
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np 2 -genvall ${MYJOB}
-
-		export OMP_NUM_THREADS=4
-		export vtuneCommand="amplxe-cl -c $analysis_type -result-dir vtune_report5_$size --target-install-dir=/gpfs/stfc/local/apps/intel/intel_cs/vtune_amplifier_xe_2015 --"
-#		$vtuneCommand mpirun -np 5 -genvall ${MYJOB}
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np 5 -genvall ${MYJOB}
-
-		export OMP_NUM_THREADS=2
-		export vtuneCommand="amplxe-cl -c $analysis_type -result-dir vtune_report10_$size --target-install-dir=/gpfs/stfc/local/apps/intel/intel_cs/vtune_amplifier_xe_2015 --"
-#		$vtuneCommand mpirun -np 10 -genvall ${MYJOB}
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np 10 -genvall ${MYJOB}
-
+		export MYJOB="/gpfs/stfc/local/HCEEC005/nnm17/gxc30-nnm17/InfOliFull/run/input/infoli.x $size $pct 1500"
 		export OMP_NUM_THREADS=1
 		export vtuneCommand="amplxe-cl -c $analysis_type -result-dir vtune_report20_$size --target-install-dir=/gpfs/stfc/local/apps/intel/intel_cs/vtune_amplifier_xe_2015 --"
 #		$vtuneCommand mpirun -np 20 -genvall ${MYJOB}
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np 20 -genvall ${MYJOB}
+		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np 4 -genvall ${MYJOB}
 
 	done
 done
 
 # the experiment is complete, clean up input and move results to output
-mv vtune_report* /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/output
-rm -rf /gpfs/stfc/local/HCPhi005/ddr01/gxc30-ddr01/InfOliFull/run/input/*
+mv vtune_report* ~/InfOliFull/run/output
+#rm -rf ~/InfOliFull/run/input/*
