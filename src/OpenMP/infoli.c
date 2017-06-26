@@ -35,6 +35,7 @@
 #include <time.h>
 #include "infoli.h"
 #include <omp.h>
+//#include <mic_power.h>
 
 int core_id, cores, cellCount;
 int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
@@ -271,6 +272,7 @@ int main(int argc, char *argv[]){
 	srand ( time(NULL) );
 	for (receiver_cell=0; receiver_cell<IO_NETWORK_SIZE; receiver_cell++) {
 
+//		#pragma omp parallel for shared (cellParamsPtr, conn_gen_buffer, receiver_cell, IO_NETWORK_SIZE, CONN_PROBABILITY) private(sender_cell, rndm)
 		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
 
 			if (sender_cell == receiver_cell)
@@ -290,16 +292,17 @@ int main(int argc, char *argv[]){
 
 		//run through the temporary buffer and fill the data structs with the bonds' info
 		i=0;	//this temporary variable will help fill the data structs
+//		#pragma omp parallel for shared (cellParamsPtr, conn_gen_buffer, receiver_cell, IO_NETWORK_SIZE, cond_value) private(sender_cell) firstprivate(i)
 		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
-			if (conn_gen_buffer[sender_cell]==0)
+			if (i>cellParamsPtr.total_amount_of_neighbours[receiver_cell])
+				;
+			else if (conn_gen_buffer[sender_cell]==0)
 				;	//skip this cell, it is not a bond
 			else {
 				cellParamsPtr.neighConductances[receiver_cell][i]=cond_value;
 				cellParamsPtr.neighId[receiver_cell][i]=sender_cell;
 				i++;
 			}
-			if (i>cellParamsPtr.total_amount_of_neighbours[receiver_cell])
-				break;
 		}
 
 		//reset the buffer for the next receiver cell
@@ -354,6 +357,7 @@ int main(int argc, char *argv[]){
 	/* start of the simulation
 	 * In case we want to read the stimulus from file inputFromFile = true
 	 */
+//	mic_power_start(1000, 200);
 	gettimeofday(&tic, NULL);
 
 	/* 	WARNING, recent changes have made inputFromFile currently unusable-
@@ -443,7 +447,7 @@ int main(int argc, char *argv[]){
 					V = V_dend[target_cell] - voltage;
 					f = 0.8f * expf(-1*powf(V, 2)/100) + 0.2f;// SCHWEIGHOFER 2004 VERSION
 					I_c_storage += cellParamsPtr.neighConductances[target_cell][i] * f * V;
-                                }	
+                                }
 				I_c[target_cell] = I_c_storage;
 			}
 
@@ -624,7 +628,9 @@ int main(int argc, char *argv[]){
 //	}
 
 	gettimeofday(&toc, NULL);
-		
+//	double energy = mic_power_finish();
+//	printf("Sire, we measure energy levels of %0.3lf kJ.\n", energy);
+	
 	/* SIM END
 	 * Free  memory and close files
 	 */
