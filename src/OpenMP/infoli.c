@@ -33,7 +33,7 @@
 #include <math.h>
 #include <sys/time.h>
 #include <time.h>
-#include "infoli_integrated.h"
+#include "infoli.h"
 #include <omp.h>
 
 int core_id, cores, cellCount;
