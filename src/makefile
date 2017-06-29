@@ -18,7 +18,7 @@ OBJ= infoli.o
 OBJC= stable_version.o
 
 # common directives
-COMP_FLAGS= -w -c -O3 -vec-report6 -opt-subscript-in-range -opt-report-phase ipo_inl -lm
+COMP_FLAGS= -w3 -c -O3 -vec-report6 -opt-subscript-in-range -opt-report-phase ipo_inl -lm
 LINK_FLAGS= -O3 -lm
 
 # mic directives
