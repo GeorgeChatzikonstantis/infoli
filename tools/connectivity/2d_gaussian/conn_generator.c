@@ -13,7 +13,7 @@ void Evaluate_connections (int, int, FILE*, FILE*, int, int, double, double, nod
 
 int main (int argc,char **argv) {
 
-	int rows, columns, i, j, max_distance;
+	int rows, columns, i, j, max_distance, seed;
 	char filename[30];
 	sprintf(filename,"cellConnections.txt");
 	FILE *out_file, *u_random;
