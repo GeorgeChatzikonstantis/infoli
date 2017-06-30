@@ -68,4 +68,5 @@ clean:
 	@echo #
 	@echo "-- Cleaning Tools --"
 	rm -f ${CONN_DIR}${GAUSS3D_DIR}*.x ${CONN_DIR}${GAUSS2D_DIR}*.x ${CONN_DIR}${NEIGH2D_DIR}*.x ${CONN_DIR}${PCT_DIR}*.x
+	rm -f ${CONN_DIR}${GAUSS3DCOMP_DIR}*.x ${CONN_DIR}${COUNT_DIR}*.x
 	rm -f ${CURR_DIR}${RANDOM_DIR}*.x ${CURR_DIR}${SINGLE_DIR}*.x ${CURR_DIR}${LOBES_DIR}*.x ${CURR_DIR}${WEIBULL_DIR}*.x
