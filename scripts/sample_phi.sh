@@ -11,7 +11,7 @@ simtime=$3
 threads=$4
 
 # root directory of InfOli dir
-rootdir="~/InfOliFull"
+rootdir=$(cd ..; pwd)
 
 # set name of attached MIC
 MICNAME="mic0"

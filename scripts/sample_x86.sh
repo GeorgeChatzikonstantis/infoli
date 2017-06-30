@@ -10,6 +10,9 @@ density=$2
 simtime=$3
 threads=$4
 
+# root directory of InfOli dir
+rootdir=$(cd ..; pwd)
+
 # prepare experiment: clean up the working room
 cd ../run
 rm -rf input/*

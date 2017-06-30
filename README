@@ -37,12 +37,13 @@ The folger contains scripts for executing the simulator on said
 clusters. Furthermore, for home usage and testing, /scripts
 holds sample scripts for compiling and using the OpenMP version
 of the code on an x86-based architecture and a Phi-KNC card.
+
 ** Please note: the simulator executes natively on the KNC
-card and requires an ssh connection to it. It does NOT assume
-the existence of a common filesystem between host and KNC and
-the sample scripts for home usage have been set up assuming
-separate filesystems. If this is not true, the script MAY need
-altering. **
+card and requires an ssh connection to it. It assumes
+the existence of a common filesystem between host and KNC - as
+is common practice for KNC systems - and the sample scripts for
+home usage have been set up assuming common filesystems. Should
+this not hold true, the script sample_phi.sh will need altering. **
 
 /run is the folder where input and output of any experimental
 run is intended to be held. There is also a folder with runtime
