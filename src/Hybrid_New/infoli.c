@@ -329,12 +329,12 @@ int main(int argc, char *argv[]){
 	}
 
 	printf("%d: ", core_id);
-	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
+/*	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
 		printf("| %d | ", receiver_cell);
 		for (i=0; i<cellParamsPtr.total_amount_of_neighbours[receiver_cell]; i++)
 			printf("%d ", cellParamsPtr.neighId[receiver_cell][i]);
 	}
-	printf("\n");
+*/	printf("\n");
 
 	/* connections mapping
 	 * for the core's cells
@@ -423,14 +423,14 @@ int main(int argc, char *argv[]){
 	syncing(r_request);
 	cleanup_requests(r_request);
 
-	printf("%d: ", core_id);
+/*	printf("%d: ", core_id);
         for (i=0; i<cores; i++) {
                 printf("| %d <-  | ", i);
                 for (j=0; j<packagesToReceive[i]; j++)
                         printf("%d ", packagesIndexToReceive[i][j]);
         }
         printf("\n");
-
+*/
 
 	/* free up memory structs not necessary
 	 * anymore (simulation body only needs
@@ -515,7 +515,7 @@ int main(int argc, char *argv[]){
 	 * Communication for main simulation
 	 * body is properly set up
 	 */
-if (core_id==2) {
+/*if (core_id==2) {
 	printf("%d: ", core_id);
 	for (i=0; i<cellCount; i++) {
 		printf(": %d : ", i);
@@ -524,7 +524,7 @@ if (core_id==2) {
 	}
 	printf("\n");
 }
-
+*/
 	//Initialize output file IF enabled
 	if (PRINTING) {
 		sprintf(tempbuf, "Execution Time for Simulation in ms:              \n");
