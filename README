@@ -10,11 +10,10 @@ x86-based architecture.
 
 Structure:
 /src holds the source code for the simulator. Notice
-that the code is, for the moment, accelerated under 3
-distinct programming models, MPI, OpenMP and a hybrid
-of the two. The makefile distinguishes between making
-for the phi accelerator and the Xeon (or any x86-based)
-processor.
+that the code is, for the moment, accelerated under 2
+distinct programming models (OpenMP and an MPI-OpenMP hybrid).
+The makefile distinguishes between building for the
+phi accelerator and the Xeon (or any x86-based) processor.
 Example of usage: make omp_phi, compiles
 and links the simulator for the phi platform, under the
 OpenMP coding paradigm.
@@ -23,9 +22,9 @@ OpenMP coding paradigm.
 A connectivity matrix (/connectivity) is imperative for
 any simulation, while an applied current (/iapp) is optional.
 The connectivity matrix is *normally* supplied by the tools
-contained in this folder, however the OpenMP version currently
-operates with a built-in matrix generator - this will be reversed
-in future versions.
+contained in this folder, however current versions of the simulator
+operate with a built-in matrix generator - the tools are kept
+for experimental usage.
 Example of usage: make pct, compiles a connectivity matrix
 generator that is based around fixed percentages of network
 density.
@@ -33,23 +32,22 @@ density.
 /scripts holds queuing and bash scripts. The codebase has been
 designed to run on computing clusters, such as UK's Hartree
 Centre STFC (http://community.hartree.stfc.ac.uk/wiki/site/admin/home.html).
-The folger contains scripts for executing the simulator on said
+The folder contains scripts for executing the simulator on said
 clusters. Furthermore, for home usage and testing, /scripts
 holds sample scripts for compiling and using the OpenMP version
 of the code on an x86-based architecture and a Phi-KNC card.
+
+* scripts flagged as work in progress:
+	microlab_omp.sh
+	sample_x86.sh
+	sample_phi.sh
 
 ** Please note: the simulator executes natively on the KNC
 card and requires an ssh connection to it. It assumes
 the existence of a common filesystem between host and KNC - as
 is common practice for KNC systems - and the sample scripts for
 home usage have been set up assuming common filesystems. Should
-this not hold true, the script sample_phi.sh will need altering. **
-
-/run is the folder where input and output of any experimental
-run is intended to be held. There is also a folder with runtime
-libraries, different for each supercomputing cluster where the
-simulator has been run on (to account for different compiler
-setups).
+this not hold true, the script sample_phi.sh will need altering.
 
 ~~~~~~~~~
 
