@@ -19,9 +19,6 @@ echo $NAME
 
 # LSF queue system options
 
-JOB=$NAME"-job"
-B_OUT=$CUR_DIR/$NAME/job.out
-B_ERR=$CUR_DIR/$NAME/job.err
 WALL="6:00"
 REQ="hname=idb1a03"
 NUM_TASKS=1
@@ -66,6 +63,11 @@ do
     esac
     shift # past argument or value
 done
+
+JOB=$NAME"-job"
+B_OUT=$CUR_DIR/$NAME/job.out
+B_ERR=$CUR_DIR/$NAME/job.err
+
 echo "SIZE= ${SIZE}|Density= ${PROB}|Simtime= ${STIME}|Request=$REQ"
 mkdir -p $CUR_DIR/$NAME
 
