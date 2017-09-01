@@ -73,9 +73,12 @@ mkdir -p $CUR_DIR/$NAME
 
 
 
-CMD="bsub -J $JOB -o $B_OUT -e $B_ERR -R \"$REQ\" -W $WALL -n $NUM_TASKS -q $BQUE \"$SCRIPT_DIR/hartree_queue_jobscript.sh -dir $CUR_DIR/$NAME -ns $SIZE -pb $PROB -st $STIME\""
+CMD="/opt/lsf/9.1/linux2.6-glibc2.3-x86_64/bin/bsub -J $JOB -o $B_OUT -e $B_ERR -R \"$REQ\" -W $WALL -n $NUM_TASKS -q $BQUE \"$SCRIPT_DIR/hartree_queue_jobscript.sh -dir $CUR_DIR/$NAME -ns $SIZE -pb $PROB -st $STIME\""
 echo $CMD
 #echo $JOB $B_OUT $B_ERR
+export LSF_ENVDIR=/opt/lsf/conf
+export LSF_SERVERDIR=/opt/lsf/9.1/linux2.6-glibc2.3-x86_64/etc
+
 eval $CMD
 
 #Ta parakato tha ginontai pio prin
