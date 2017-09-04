@@ -35,6 +35,7 @@
 #include <time.h>
 #include "infoli.h"
 #include <omp.h>
+//#include <mic_power.h>
 
 int core_id, cores, cellCount;
 int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
@@ -72,7 +73,7 @@ int main(int argc, char *argv[]){
 	 * necessary for program flow
 	 */
 
-	int i=0, j, k=0, line_count,l, p, q, x, y, targetCore;
+	int i=0, j, k=0, line_count, targetCore;
 	char c;
 	char *inFileName;
 	char outFileName[100];
@@ -271,15 +272,17 @@ int main(int argc, char *argv[]){
 	srand ( time(NULL) );
 	for (receiver_cell=0; receiver_cell<IO_NETWORK_SIZE; receiver_cell++) {
 
+//		#pragma omp parallel for shared (cellParamsPtr, conn_gen_buffer, receiver_cell, IO_NETWORK_SIZE, CONN_PROBABILITY) private(sender_cell, rndm)
 		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
 
 			if (sender_cell == receiver_cell)
 				;		//no self-feeding connections allowed
 			else {
 				rndm = ((float) rand()) / ((float) RAND_MAX);	//generate rng and compare to probability
-				if (rndm <= CONN_PROBABILITY)
+				if (rndm <= CONN_PROBABILITY) {
 					cellParamsPtr.total_amount_of_neighbours[receiver_cell]++;  //increase neighbour count
 					conn_gen_buffer[sender_cell]++;	//mark that we formed a bond with this cell
+				}
 			}
 		}
 
@@ -289,16 +292,17 @@ int main(int argc, char *argv[]){
 
 		//run through the temporary buffer and fill the data structs with the bonds' info
 		i=0;	//this temporary variable will help fill the data structs
+//		#pragma omp parallel for shared (cellParamsPtr, conn_gen_buffer, receiver_cell, IO_NETWORK_SIZE, cond_value) private(sender_cell) firstprivate(i)
 		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
-			if (conn_gen_buffer[sender_cell]==0)
+			if (i>cellParamsPtr.total_amount_of_neighbours[receiver_cell])
+				;
+			else if (conn_gen_buffer[sender_cell]==0)
 				;	//skip this cell, it is not a bond
 			else {
 				cellParamsPtr.neighConductances[receiver_cell][i]=cond_value;
 				cellParamsPtr.neighId[receiver_cell][i]=sender_cell;
 				i++;
 			}
-			if (i>cellParamsPtr.total_amount_of_neighbours[receiver_cell])
-				break;
 		}
 
 		//reset the buffer for the next receiver cell
@@ -353,6 +357,7 @@ int main(int argc, char *argv[]){
 	/* start of the simulation
 	 * In case we want to read the stimulus from file inputFromFile = true
 	 */
+//	mic_power_start(1000, 200);
 	gettimeofday(&tic, NULL);
 
 	/* 	WARNING, recent changes have made inputFromFile currently unusable-
@@ -420,7 +425,7 @@ int main(int argc, char *argv[]){
 	/*	First Loop takes care of Gap Junction Functions
  	*/			
 
-		#pragma omp parallel for shared (cellParamsPtr, iAppIn, V_dend, I_c, pOutFile) private(iApp, target_cell, i, \
+		#pragma omp parallel for shared (cellParamsPtr, iApp, iAppIn, V_dend, I_c, pOutFile) private(target_cell, i, \
 		requested_neighbour, f, V, voltage, I_c_storage) firstprivate(simulation_array_ID)
 			for (target_cell=0;target_cell<cellCount;target_cell++) {
 
@@ -442,7 +447,7 @@ int main(int argc, char *argv[]){
 					V = V_dend[target_cell] - voltage;
 					f = 0.8f * expf(-1*powf(V, 2)/100) + 0.2f;// SCHWEIGHOFER 2004 VERSION
 					I_c_storage += cellParamsPtr.neighConductances[target_cell][i] * f * V;
-                                }	
+                                }
 				I_c[target_cell] = I_c_storage;
 			}
 
@@ -473,8 +478,8 @@ int main(int argc, char *argv[]){
 			__assume_aligned(Sodium_h_a, 64);
 			__assume_aligned(Potassium_x_a, 64);
 		#pragma omp parallel for simd shared (cellParamsPtr, V_dend, Hcurrent_q, Calcium_r, Potassium_s, I_CaH, Ca2Plus,\
-		iAppIn, I_c, V_soma, g_CaL, Sodium_m, Sodium_h, Calcium_k, Calcium_l, Potassium_n, Potassium_p, Potassium_x_s,\
-		V_axon, Sodium_m_a, Sodium_h_a, Potassium_x_a, pOutFile) private(iApp, target_cell, tempbuf, q_inf, tau_q, dq_dt,\
+		iApp, iAppIn, I_c, V_soma, g_CaL, Sodium_m, Sodium_h, Calcium_k, Calcium_l, Potassium_n, Potassium_p, Potassium_x_s,\
+		V_axon, Sodium_m_a, Sodium_h_a, Potassium_x_a, pOutFile) private(target_cell, tempbuf, q_inf, tau_q, dq_dt,\
 		alpha_r, beta_r, r_inf, tau_r, dr_dt, alpha_s, beta_s, s_inf, tau_s, ds_dt, dCa_dt, I_sd, I_CaH_temp, I_K_Ca, I_ld,\
 		I_h, dVd_dt, k_inf, l_inf, tau_k, tau_l, dk_dt, dl_dt, m_inf, h_inf, tau_h, dh_dt, n_inf, p_inf, tau_n, tau_p, dn_dt,\
 		dp_dt, alpha_x_s, beta_x_s, x_inf_s, tau_x_s, dx_dt_s, I_ds, I_CaL, I_Na_s, I_ls, I_Kdr_s, I_K_s, I_as, dVs_dt,\
@@ -623,7 +628,9 @@ int main(int argc, char *argv[]){
 //	}
 
 	gettimeofday(&toc, NULL);
-		
+//	double energy = mic_power_finish();
+//	printf("Sire, we measure energy levels of %0.3lf kJ.\n", energy);
+	
 	/* SIM END
 	 * Free  memory and close files
 	 */

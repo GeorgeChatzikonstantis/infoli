@@ -1,71 +1,86 @@
+#!/bin/bash 
+
+# set some script parameters
+max_reps=1
+simtime=1000
+
+echo "Fixed Experiments Time to $simtime ms."
+
 # set name of attached MIC
 MICNAME="mic0"
 
+# root directory of InfOli dir
+rootdir="/home/georgec/InfOliFull"
+
 # prepare experiment: clean up the working room
-cd ~/infoli/run
+cd $rootdir/run
 rm -rf input/*
 
 # prep input: compiling executable
-cd ~/infoli/src
+cd $rootdir/src
 make omp_phi
-mv OpenMP/infoli.x ~/infoli/run/input
-
-# prep input: compile desired connectivity generator
-cd ~/infoli/tools
-make count
-mv connectivity/3d_synapse_count/conn_generator.x ~/infoli/run/input
+mv OpenMP/infoli.x ../run/input
 
 # prep input: copy runtime lib to input
-cd ~/infoli/run
+cd $rootdir/run
 cp runtime_libs/microlab/phaethon/libiomp5.so input
+cp runtime_libs/power/lib* input
 
 # copy necessities to the mic
+cd input
 export tag=$RANDOM
 ssh $MICNAME "mkdir experiment$tag"
-cd ~/infoli/run/input
-scp infoli.x libiomp5.so $MICNAME:~/experiment$tag
+scp * $MICNAME:~/experiment$tag
 
 # preparations complete, conduct the experiment
-cd ~/infoli/run/input
-
-for size in 1000 2000 5000 10000
+for (( reps=1; reps<=$max_reps; reps++ ))
 do
-	for synapses in 10 20 50 100 200 500
+
+echo "Repetition $reps/$max_reps Commencing."
+
+	for size in 1000 2000 4000 6000 8000 10000
 	do
 
-		export MYJOB="./infoli.x $size"
+	echo "NW Size = $size neurons."
 
-		# generate connectivity map and move it to the mic
-		./conn_generator.x $((size/100)) 10 10 $synapses 1
-		scp cellConnections.txt $MICNAME:~/experiment$tag
-
-		for threads in 50 100 200
+		for synapses in 0 250 500 750 1000
 		do
-			export THREADSN=$threads
 
-			export vtuneCommand="amplxe-cl -c general-exploration \
-			-result-dir vtune_report${threads}_${size}_${synapses} \
-			-target-system=mic-native:0 -knob enable-vpu-metrics=true \
-			-knob collect-memory-bandwidth=true -knob enable-tlb-metrics=true --"
+			echo "Synapses = $synapses"
 
-#			export vtuneCommand="amplxe-cl -c memory-access \
-#			-result-dir vtune_report${threads}_${size} -target-system=mic-native:0 -- "
+			density=$(bc -l <<< "scale=6; $synapses/$size")
+			export MYJOB="./infoli.x $size $density $simtime"
 
-			$vtuneCommand "export \
-			LD_LIBRARY_PATH=/home/georgec/experiment$tag:$LD_LIBRARY_PATH; \
-			export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t; \
-			export OMP_NUM_THREADS=${THREADSN}; cd ~/experiment$tag; ${MYJOB}"
+			for threads in 200
+			do
+				export THREADSN=$threads
 
-#			/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" ssh ${MICNAME} "\
-#			export LD_LIBRARY_PATH=/home/georgec/experiment$tag:$LD_LIBRARY_PATH; \
-#			export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t; \
-#			export OMP_NUM_THREADS=${THREADSN}; cd ~/experiment$tag; ${MYJOB}"
+				export vtuneCommand="amplxe-cl -c general-exploration \
+				-result-dir vtune_report${threads}_${size}_${synapses} \
+				-target-system=mic-native:0 -knob enable-vpu-metrics=true \
+				-knob collect-memory-bandwidth=true -knob enable-tlb-metrics=true --"
 
+#				export vtuneCommand="amplxe-cl -c memory-access \
+#				-result-dir vtune_report${threads}_${size} -target-system=mic-native:0 -- "
+
+#				$vtuneCommand "export \
+#				LD_LIBRARY_PATH=/home/georgec/experiment$tag:$LD_LIBRARY_PATH; \
+#				export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t; \
+#				export OMP_NUM_THREADS=${THREADSN}; cd ~/experiment$tag; ${MYJOB}"
+
+				ssh ${MICNAME} "\
+				export LD_LIBRARY_PATH=/home/georgec/experiment$tag:$LD_LIBRARY_PATH; \
+				export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t; \
+				export OMP_NUM_THREADS=${THREADSN}; cd ~/experiment$tag; ${MYJOB}"
+
+			done
 		done
 	done
 done
 
+echo "Done!"
+
 # the experiment is complete, clean up input and mic-trash and move results to output
 ssh $MICNAME "rm -rf ~/experiment$tag"
-mv vtune_report* ~/infoli/run/output
-rm -rf ~/infoli/run/input/*
+mv vtune_report* $rootdir/run/output
+#rm -rf $rootdir/run/input/*

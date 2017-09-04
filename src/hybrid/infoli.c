@@ -1,3 +1,31 @@
+/*
+ *
+ * Copyright (c) 2012, Neurasmus B.V., The Netherlands,
+ * web: www.neurasmus.com email: voltage@neurasmus.com
+ *
+ * Any use or reproduction in whole or in parts is prohibited
+ * without the written consent of the copyright owner.
+ *
+ * All Rights Reserved.
+ *
+ *
+ * Author: Sebastian Isaza
+ * Created: 19-01-2012
+ * Modified: 07-08-2012
+ *
+ * Description: Top source file of the Inferior Olive model, originally written
+ * in Matlab by Jornt De Gruijl. It contains the implementation of all functions.
+ * The main function allocates the necessary memory, initializes the system
+ * state and runs the model calculations.
+ *
+ */
+
+/*
+ * we assume that dim1 refers to the number of ROWS
+ * and dim2 refers to COLUMNS (cell network size).
+ */
+
+
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,8 +37,9 @@
 #include <omp.h>
 #include "infoli.h"
 
-int core_id, cores, cellCount;
+int core_id, cores, cellCount, core_offset;
 int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
+float CONN_PROBABILITY;
 struct timeval tic, toc, intime;
 
 void subtract_and_add (struct timeval *Z,struct timeval*x,struct timeval *y) {
@@ -40,48 +69,60 @@ char fpeek(FILE *stream)
 
 int main(int argc, char *argv[]){
 	
-	int i=0, j, k=0, line_count,l, p, q, x, y, targetCore;
+	/* declaration of variables
+	 * necessary for program flow
+	 */
+
+	int i=0, j, k=0, line_count, targetCore, global_cell_id;
 	char c;
 	char *inFileName;
 	char outFileName[100];
 	FILE *pInFile, *coreF;
-	char conFile[100],core_file[100];
+	char conFile[200],core_file[100];
 	FILE *pConFile,*pOutFile;
 	mod_prec* iAppArray= NULL;
 	int simStep = 0, inputFromFile = 0, initSteps,total_simulation_steps;
 	float simTime = 0;
-	cellState **cellPtr;
-	cellCompParams *cellParamsPtr;
 	int seedvar;
 	char tempbuf[100];		
-	mod_prec iApp;
+	mod_prec iApp, voltage;
 	mod_prec *gcal;
 	int *init_steps;
 	long double seconds;
-	int simulation_array_ID,target_cell;
-	sending_node *sending_list_head = NULL;
-	receiving_node *receiving_list_head = NULL;
-	int my_num;
+	int simulation_array_ID,target_cell, local_cell, requested_neighbour;
+	int package_index, coded_package_index, decoded_package_index;
+
+	cellCompParams cellParamsPtr;
+
+	/* declaration of variables
+	 * necessary for ion channel
+	 * computations
+	 */
+
+	mod_prec q_inf, tau_q, dq_dt;
+	mod_prec alpha_r, beta_r, r_inf, tau_r, dr_dt;
+	mod_prec alpha_s, beta_s, s_inf, tau_s, ds_dt;
+	mod_prec dCa_dt, f, V, I_c_storage;
+	mod_prec I_sd, I_CaH_temp, I_K_Ca, I_ld, I_h, dVd_dt;
+
+	mod_prec k_inf, l_inf, tau_k, tau_l, dk_dt, dl_dt;
+	mod_prec m_inf, h_inf, tau_h, dh_dt;
+	mod_prec n_inf, p_inf, tau_n, tau_p, dn_dt, dp_dt;
+	mod_prec alpha_x_s, beta_x_s, x_inf_s, tau_x_s, dx_dt_s;
+	mod_prec I_ds, I_CaL, I_Na_s, I_ls, I_Kdr_s, I_K_s, I_as, dVs_dt;
+
+	mod_prec m_inf_a, h_inf_a, tau_h_a, dh_dt_a;
+	mod_prec alpha_x_a, beta_x_a, x_inf_a, tau_x_a, dx_dt_a;
+	mod_prec I_Na_a, I_la, I_sa, I_K_a, dVa_dt;
+
+	/* end of declarations
+	 */ 
 
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MPI_COMM_WORLD, &core_id);
 	MPI_Comm_size(MPI_COMM_WORLD, &cores);
 	MPI_Request* s_request = (MPI_Request*) malloc(cores*sizeof(MPI_Request));      //array of request handles for MPI_Isend, one for each core in the network
-        MPI_Request* r_request = (MPI_Request*) malloc(cores*sizeof(MPI_Request));	//array of request handles for MPI_Irecv, one for each core in the network
-
-	/* outFileName is file for output
-	 * conFile is input of the cell's connections
-	 */
-	sprintf(core_file,"core%d",core_id);		
-	sprintf(outFileName,"InferiorOlive_Output%d.txt",core_id);		
-	sprintf(conFile,"cellConnections.txt");
-
-	IO_NETWORK_SIZE = atoi(argv[1]); 
-	
-	/* compute how many grid cells 
-	 * are assigned to each core
-	 */
-        cellCount= (IO_NETWORK_SIZE / cores);
+	MPI_Request* r_request = (MPI_Request*) malloc(cores*sizeof(MPI_Request));      //array of request handles for MPI_Irecv, one for each core in the network
 
 	/* Process command line arguments
 	 * Case argc = 3 then a one-pulse input is stimulated.
@@ -89,102 +130,413 @@ int main(int argc, char *argv[]){
 	 * in the case of inputFromFile, we will also need a buffer to hold the stimulus
 	 * for each cell on each step
   	 */
+
+	char host_name[100];
+	gethostname(host_name, 100);
+	printf("Rank %d: Running on %s.\n", core_id, host_name);
 	
-	if(argc == 2) {
+	if(argc == 4) {
 		inputFromFile = 0;
 	}
-	else if(argc == 3) {
+	else if(argc == 5) {
 		inputFromFile = 1;
-		inFileName = argv[3];
+		inFileName = argv[2];
 		pInFile = fopen(inFileName,"r");
 		if(pInFile==NULL) {
 			printf("Error: Couldn't open %s\n", inFileName);
 			exit(EXIT_FAILURE);
 		}
-		iAppArray= (mod_prec*) malloc(cellCount*(sizeof(mod_prec)));
+		iAppArray= (mod_prec*) _mm_malloc(cellCount*(sizeof(mod_prec)), 64);
 	}	
 	else {
-		printf("Error: Too many arguments.\nUsage: ./InferiorOlive <dim1> <dim2> <Iapp_input_file> or ./InferiorOlive <dim1> <dim2>\n");
+		printf("Error: Too many arguments.\nUsage: ./InferiorOlive <#nrns> <density ([0,1])> <simtime>\nor ./InferiorOlive <#nrns> <density ([0,1])> <simtime> <stimulus_file>\n");
 		exit(EXIT_FAILURE);
 	}
 
-	
+	/* outFileName is file for output
+	 */
+        sprintf(outFileName,"InferiorOlive_Output%d.txt", core_id);
+        
+        IO_NETWORK_SIZE = atoi(argv[1]);
+        CONN_PROBABILITY = atof(argv[2]);
+        simTime = atof(argv[3]);
+
+        /* compute how many grid cells 
+	 * are assigned to each core
+	*/
+
+        cellCount= IO_NETWORK_SIZE/cores;
+
+	/* compute offset each core applies
+	 * to its assigned (local) cells
+	 * in order to calculate a cell id
+	 * relevant to the entire (global) network
+	 */
+
+	core_offset = core_id*cellCount;
+
 	/* PRINTING is true in case we want to write the
 	 * output to a specified file (outFileName)
 	 */
+
 	if (PRINTING) {
 		pOutFile = fopen(outFileName,"w+");
 		if(pOutFile==NULL){
 			printf("Error: Couldn't create %s\n", outFileName);
 			exit(EXIT_FAILURE);
 		}
-		sprintf(tempbuf, "#simSteps Time(ms) Input(Iapp) Output(V_axon)");
-		fputs(tempbuf, pOutFile);
 	}
 
-	
-	/* CellPtr is a 2-D array of size 2*CellCount 
-	 * and containd cell states used in every simulation 
-	 * step accordingly
-	 */	
-	cellPtr = malloc(2*sizeof(cellState *));
-	if(cellPtr==NULL){
-		printf("Error: Couldn't malloc for cellPtr\n");
-		exit(EXIT_FAILURE);
-	}
-	
-	cellPtr[0] = malloc(cellCount*sizeof(cellState));
-	cellPtr[1] = malloc(cellCount*sizeof(cellState));
-	if ((!cellPtr[0])||(!cellPtr[1])) {
-		printf("Error: Couldn't malloc the array for cellStates\n");
-		exit(EXIT_FAILURE);
-	}
-
-
-
-	/* cellCompParams struct is used to update a cell state.
-	 * It contains the current flowing to this specific cell
-	 * voltages from communicating cells , and pointers to the previous
-	 * cell state and to the next cell state
-	 * We allocate cellCount cellCompParams for all the core's cells
-	 * Pointer to previous and next states are pointers to CellPtr[0] and CellPtr[1]
-	 * elements.
+	/* Channel declaration and mem allocation 
+	 * 
 	 */
-	cellParamsPtr = malloc(cellCount*sizeof(cellCompParams));
-	if(cellParamsPtr==NULL){
+
+	int* cellID = (int*) _mm_malloc(cellCount*sizeof(int), 64);
+	mod_prec* V_dend = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Hcurrent_q = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Calcium_r = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Potassium_s = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* I_CaH = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Ca2Plus = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* iAppIn = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* I_c = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* V_soma = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* g_CaL = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Sodium_m = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Sodium_h = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Calcium_k = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Calcium_l = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Potassium_n = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Potassium_p = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Potassium_x_s = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* V_axon = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Sodium_m_a = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Sodium_h_a = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+	mod_prec* Potassium_x_a = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+
+	if (!(Potassium_x_a)) {
+		printf("Error: Couldn't allocate memory for channels\n");
+		exit(EXIT_FAILURE);
+	}
+
+	/* Initialise network with appropriate values.
+	*/
+
+	for (i=0;i<cellCount;i++) {
+		cellID[i] = i;
+		//Initial dendritic parameters
+		V_dend[i] = -60;
+		Calcium_r[i] = 0.0112788;// High-threshold calcium
+		Potassium_s[i] = 0.0049291;// Calcium-dependent potassium
+		Hcurrent_q[i] = 0.0337836;// H current
+		Ca2Plus[i] = 3.7152;// Calcium concentration
+		I_CaH[i] = 0.5;// High-threshold calcium current
+		//Initial somatic parameters
+		g_CaL[i] = 0.68; //default arbitrary value but it should be randomized per cell
+		V_soma[i] = -60;
+		Sodium_m[i] = 1.0127807;// Sodium (artificial)
+		Sodium_h[i] = 0.3596066;
+		Potassium_n[i] = 0.2369847;// Potassium (delayed rectifier)
+		Potassium_p[i] = 0.2369847;
+		Potassium_x_s[i] = 0.1;// Potassium (voltage-dependent)
+		Calcium_k[i] = 0.7423159;// Low-threshold calcium
+		Calcium_l[i] = 0.0321349;
+		// Initial axonal parameters
+		V_axon[i] = -60;
+		//sisaza: Sodium_m_a doesn't have a state, therefore this assignment doesn'thave any effect
+		Sodium_m_a[i] = 0.003596066;// Sodium (thalamocortical)
+		Sodium_h_a[i] = 0.9;
+		Potassium_x_a[i] = 0.2369847;// Potassium (transient)
+	}
+
+	if (G_CAL_FROM_FILE)
+		read_g_CaL_from_file(g_CaL);
+
+	/* cellCompParams contains
+	 * connection information for the NW
+	 */
+
+
+	//1D-array storing how many connections each neuron has
+	cellParamsPtr.total_amount_of_neighbours = (int*) _mm_malloc(cellCount*sizeof(int), 64);
+	for (i=0;i<cellCount;i++)
+		cellParamsPtr.total_amount_of_neighbours[i] = 0;	//needed bugfix initialization
+	//2D-array storing the ids of each connection
+	cellParamsPtr.neighId = (int**) _mm_malloc(cellCount*sizeof(int*), 64);
+	//2D-array storing the conductances of each connection
+	cellParamsPtr.neighConductances = (mod_prec**) _mm_malloc(cellCount*sizeof(mod_prec*), 64);
+
+	if(cellParamsPtr.neighConductances==NULL){
 		printf("Error: Couldn't malloc for cellParamsPtr\n");
 		exit(EXIT_FAILURE);
 	}
-	for (i=0;i<cellCount;i++)					//initial amount of neighbours for each cell is 0 (bug fix in case the cell stays isolated)
-		cellParamsPtr[i].total_amount_of_neighbours = 0;
 
-	/* Make_Core_Communication_List creates a list that details information that this
-	 * core needs to exchange with every other core employed.
-	 * !!!  The function also takes care of important buffers, such as
-	 * the conductance buffer for every cell  !!!
+	mod_prec cond_value= 0.04;	//default value for conductance in synapses (microSiemens)
+
+	/* we shall generate a connectivity map
+	 * based on the probability given by the user
+	 * Note that this map handles the core's cells
+	 * connections to the entire network
 	 */
 
-	if (COMPRESSED_MAP==0)
-		sending_list_head = Make_Core_Communication_List_newest_format(conFile, cellParamsPtr);
-	else
-		sending_list_head = Make_Core_Communication_List_compressed_format(conFile, cellParamsPtr);
+	int sender_cell, receiver_cell;
+	int* conn_gen_buffer=(int*) calloc(IO_NETWORK_SIZE, sizeof(int));	//temp buffer for storing bonds
+	float rndm;
 
-	/* Reckon_phase is an initial communicational process that exchanges information
-	 * between cores which describes which cells each core will send to each other core.
-	 * We can do this only once in the beginning since this scheme does not change -for now-
-	 * to avoid exchanging unnecessary information during the simulation
-	 */ 
+	/* we generate rng checks against the probability
+	 * supplied by the user to calculate connection counts
+ 	 * We store the results of each rng check in a temp buffer
+ 	 * After we are done, we allocate memory for dendritic data structs
+ 	 * and fill it with neighbour (bonds) ids
+ 	 */
 
-	receiving_list_head = reckon_phase(sending_list_head, cellParamsPtr);
+	srand ( time(NULL) + core_id );
+	short* cellsNeeded = (short*) calloc(IO_NETWORK_SIZE, sizeof(short));	//buffer marking cells in other cores necessary to this core
 
-	/* Initialise cellPtr[0] with appropriate values.
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
+		global_cell_id = receiver_cell + core_offset;
+		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
+
+			if (sender_cell == global_cell_id)
+				;		//no self-feeding connections allowed
+			else {
+				rndm = ((float) rand()) / ((float) RAND_MAX);	//generate rng and compare to probability
+				if (rndm <= CONN_PROBABILITY) {
+					cellParamsPtr.total_amount_of_neighbours[receiver_cell]++;  //increase neighbour count
+					conn_gen_buffer[sender_cell]++;	//mark that we formed a bond with this cell
+					if ((sender_cell/cellCount)!=core_id) //if this cell does not belong to core
+						cellsNeeded[sender_cell]  = 1; //mark it
+				}
+			}
+		}
+
+		//allocate enough space now that we know how many neighbours this receiving cell has
+		cellParamsPtr.neighConductances[receiver_cell] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(mod_prec), 64);
+		cellParamsPtr.neighId[receiver_cell] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(int), 64);
+
+		//run through the temporary buffer and fill the data structs with the bonds' info
+		i=0;	//this temporary variable will help fill the data structs
+		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
+			if (conn_gen_buffer[sender_cell]==0)
+				;	//skip this cell, it is not a bond
+			else {
+				cellParamsPtr.neighConductances[receiver_cell][i]=cond_value;
+				cellParamsPtr.neighId[receiver_cell][i]=sender_cell;
+				i++;
+			}
+			if (i>cellParamsPtr.total_amount_of_neighbours[receiver_cell])
+				break;
+		}
+
+		//reset the buffer for the next receiver cell
+		memset(conn_gen_buffer, 0, IO_NETWORK_SIZE*sizeof(int));
+	}
+
+	printf("%d: ", core_id);
+/*	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
+		printf("| %d | ", receiver_cell);
+		for (i=0; i<cellParamsPtr.total_amount_of_neighbours[receiver_cell]; i++)
+			printf("%d ", cellParamsPtr.neighId[receiver_cell][i]);
+	}
+*/	printf("\n");
+
+	/* connections mapping
+	 * for the core's cells
+	 * to the entire network
+ 	 * is now complete
+ 	 */
+
+	/* cores will exchange knowledge
+	 * of each sub-network's connections
+	 * in order to sync the sub-network's
+	 * connectivity needs
+	 *
+ 	 * scatter the cellsNeeded matrix
+	 * so that other cores know which cells are needed
 	 */
-	initState(cellPtr[0]);
-	
+
+	short** cellsToSend = (short**) malloc(cores*sizeof(short*));
+	for (i=0; i<cores; i++) {
+		cellsToSend[i] = (short*) malloc(cellCount*sizeof(short));
+		MPI_Scatter(cellsNeeded, cellCount, MPI_SHORT, cellsToSend[i], cellCount, MPI_SHORT, i, MPI_COMM_WORLD);
+	}
+
+	/* process received matrix so that the number of cells
+	 * necessary for exchanging per core is known
+	 */
+
+	int* packagesToSend = (int*) calloc(cores, sizeof(int));
+	for (i=0; i<cores; i++) {
+		for (j=0; j<cellCount; j++) {
+			if (cellsToSend[i][j] > 0)
+				packagesToSend[i]++;
+		}
+	}
+	packagesToSend[core_id]=0;	//no need for packages to same-core
+	int* packagesToReceive = (int*) calloc(cores, sizeof(int));
+	for (i=0; i<cores; i++) {
+		MPI_Scatter(packagesToSend, 1, MPI_INT, &packagesToReceive[i], 1, MPI_INT, i, MPI_COMM_WORLD);
+	}
+
+	/* notify the other cores the (global) indexes
+	 * of each cells that they will be receiving
+	 */
+	int** packagesIndexToSend = (int**) malloc(cores*sizeof(int*));
+	for (i=0; i<cores; i++) {
+		packagesIndexToSend[i] = (int*) calloc(packagesToSend[i], sizeof(int));
+		k=0;
+		for (j=0; j<cellCount; j++) {
+			global_cell_id = j + core_offset;
+			if (cellsToSend[i][j] > 0) {
+				packagesIndexToSend[i][k] = global_cell_id;
+				k++;
+			}
+			if (k>(packagesToSend-1))
+				break;
+		}
+	}
+	int** packagesIndexToReceive = (int**) malloc(cores*sizeof(int*));
+	for (i=0; i<cores; i++) {
+		packagesIndexToReceive[i] = (int*) calloc(packagesToReceive[i], sizeof(int));
+		if (i!=core_id) {
+			MPI_Isend(packagesIndexToSend[i], packagesToSend[i], MPI_INT, i, 0, MPI_COMM_WORLD, &s_request[i]);
+			MPI_Irecv(packagesIndexToReceive[i], packagesToReceive[i], MPI_INT, i, 0, MPI_COMM_WORLD, &r_request[i]);
+		} else {
+			r_request[i]= MPI_REQUEST_NULL;
+		}
+	}
+
+	/* create buffers that will send and hold
+	 * the respective voltages in each sim step
+	 */
+
+	mod_prec** packagesVoltToSend = (mod_prec**) _mm_malloc(cores*sizeof(mod_prec*), 64);
+	for (i=0; i<cores; i++)
+		packagesVoltToSend[i] = (mod_prec*) _mm_malloc(packagesToSend[i]*sizeof(mod_prec), 64);
+	mod_prec** packagesVoltToReceive = (mod_prec**) _mm_malloc(cores*sizeof(mod_prec*), 64);
+	for (i=0; i<cores; i++) {
+		if (i==core_id)
+			packagesVoltToReceive[i] = (mod_prec*) _mm_malloc(cellCount*sizeof(mod_prec), 64);
+		else
+			packagesVoltToReceive[i] = (mod_prec*) _mm_malloc(packagesToReceive[i]*sizeof(mod_prec), 64);
+	}
+
+	/* sync asynchronous calls to ensure
+	 * core syncing
+	 */
+	syncing(r_request);
+	cleanup_requests(r_request);
+
+/*	printf("%d: ", core_id);
+        for (i=0; i<cores; i++) {
+                printf("| %d <-  | ", i);
+                for (j=0; j<packagesToReceive[i]; j++)
+                        printf("%d ", packagesIndexToReceive[i][j]);
+        }
+        printf("\n");
+*/
+
+	/* free up memory structs not necessary
+	 * anymore (simulation body only needs
+	 * the packages data structs)
+	 */
+	for (i=0;i<cores;i++)
+		free(cellsToSend[i]);
+	free(cellsToSend);
+	free(cellsNeeded);
+
+	/* create a secondary struct
+	 * which allows the core's cells
+	 * to know the location (index) of their
+	 * connections' data in each of the
+	 * received packages from other cores.
+	 * This index matching allows
+	 * skipping parses of the received 
+	 * packages, accelerating post-communication
+	 * processing but increasing memory footprint
+	 * The index will be "codified" in a way that allows
+	 * its value to indicate both  which package to look
+	 * for (i.e. which core it came from) and the
+	 * exact position within the package (i.e. index)
+	 */
+
+	int** packagesIndexMatcher = (int**) _mm_malloc(cellCount*sizeof(int*), 64);
+	int packageNumber;	//which package to match index with, corresponds to which core sent the package
+	int packageIndex;	//which index of the package we are currently examinating
+	int neighbour;		//which connection of the receiver cell we are trying to match
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) { 
+		packagesIndexMatcher[receiver_cell] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(int), 64);
+		packageNumber=0;
+		packageIndex=0;
+		neighbour=0;
+
+		while ((packageNumber<cores)&&(neighbour<cellParamsPtr.total_amount_of_neighbours[receiver_cell])) {
+
+			packagesIndexMatcher[receiver_cell][neighbour]=-1;
+
+			if (packageNumber==core_id) {
+				packageNumber++;
+				if (!(packageNumber<cores))
+					break;
+				packageIndex=0;
+			}
+			
+			if ((cellParamsPtr.neighId[receiver_cell][neighbour]/cellCount)==core_id) {
+				local_cell=cellParamsPtr.neighId[receiver_cell][neighbour];
+				packagesIndexMatcher[receiver_cell][neighbour]=local_cell;
+				neighbour++;
+			} else {
+
+				if (cellParamsPtr.neighId[receiver_cell][neighbour]==packagesIndexToReceive[packageNumber][packageIndex]) {
+					packagesIndexMatcher[receiver_cell][neighbour]=packageIndex+packageNumber*cellCount;
+					neighbour++;
+				}
+
+				packageIndex++;
+				if (packageIndex>(packagesToReceive[packageNumber]-1)) {
+					packageNumber++;
+					packageIndex=0;
+				}
+			}
+
+		}
+
+		while (neighbour<cellParamsPtr.total_amount_of_neighbours[receiver_cell]) {
+
+			packagesIndexMatcher[receiver_cell][neighbour]=-1;
+			if ((cellParamsPtr.neighId[receiver_cell][neighbour]/cellCount)==core_id) {
+				local_cell=cellParamsPtr.neighId[receiver_cell][neighbour];
+				packagesIndexMatcher[receiver_cell][neighbour]=local_cell;
+			}
+			neighbour++;
+		}
+
+	}
+
+
+	/* cores are now up-to-date with
+	 * each other's communicational needs.
+	 * Communication for main simulation
+	 * body is properly set up
+	 */
+/*if (core_id==2) {
+	printf("%d: ", core_id);
+	for (i=0; i<cellCount; i++) {
+		printf(": %d : ", i);
+		for (j=0; j<cellParamsPtr.total_amount_of_neighbours[i]; j++)
+			printf("%d ", packagesIndexMatcher[i][j]);
+	}
+	printf("\n");
+}
+*/
+	//Initialize output file IF enabled
 	if (PRINTING) {
+		sprintf(tempbuf, "Execution Time for Simulation in ms:              \n");
+		fputs(tempbuf, pOutFile);
+		sprintf(tempbuf, "#simSteps Input(Iapp) Output(V_axon)");
+                fputs(tempbuf, pOutFile);
 		for (i=0;i<cellCount;i++) {
-			sprintf(tempbuf, "%d ", cellPtr[0][i].cellID);
-//			sprintf(tempbuf, "[%d][%d] ", cellPtr[0][i].cell_x, cellPtr[0][i].cell_y);
+			sprintf(tempbuf, "%d ", cellID[i]);
 			fputs(tempbuf, pOutFile);
 		}
 		sprintf(tempbuf, "\n");
@@ -192,50 +544,44 @@ int main(int argc, char *argv[]){
 	}
 	
 	//Initialize g_CaL
-	seedvar = time(NULL)+core_id;		//seedvar will be time- and core-dependent now!
+	seedvar = time(NULL);		//seedvar will be time- and core-dependent now!
 	srand(seedvar);
 
-	for(i=0;i<cellCount;i++){
-		cellPtr[1][i].soma.g_CaL = cellPtr[0][i].soma.g_CaL;
-		if (RAND_INIT) {
-			cellPtr[0][i].soma.g_CaL = 0.6+(0.2*(rand()%100)/100);
-			cellPtr[1][i].soma.g_CaL = cellPtr[0][i].soma.g_CaL;
-		}
-	}
+	if (RAND_INIT)
+		for(i=0;i<cellCount;i++)
+			g_CaL[i] = 0.6+(0.2*(rand()%100)/100);
 
 	//random initialization process
 	if (RAND_INIT) {
 		for(i=0;i<cellCount;i++) {
 			initSteps = rand()%(int)ceil(100/DELTA);
-			initSteps = initSteps | 0x00000001;//make it odd, so that the final state is in prevCellState
+			initSteps = initSteps | 0x00000001;//make initialization steps odd
 
 			for(j=0;j<initSteps;j++){
-				//Arrange inputs
-				cellParamsPtr[i].iAppIn = 0;//No stimulus
-				cellParamsPtr[i].prevCellState = &cellPtr[j%2][i];
-				cellParamsPtr[i].newCellState = &cellPtr[(j%2)^1][i];
-
-				CompDend(&cellParamsPtr[i], 1);
-				CompSoma(&cellParamsPtr[i]);
-				CompAxon(&cellParamsPtr[i]);
+				//Arrange input
+				iAppIn[i] = 0;//No stimulus
+				
+//				CompDend(&cellParamsPtr[i], 1);  PLACEHOLDER RANDOMIZATION, NEEDS RE-CODING
+//				CompSoma(&cellParamsPtr[i]);
+//				CompAxon(&cellParamsPtr[i]);
 			}
 
 		}
 	}
 
-	int last_index;
-	int cell_id, translated_cell_id, requested_neighbour, my_requested_cell, core, found;
-	receiving_node* r_temp;	
 	/* start of the simulation
 	 * In case we want to read the stimulus from file inputFromFile = true
 	 */
+	gettimeofday(&tic, NULL);
 
-	if(inputFromFile){
+	/* 	WARNING, recent changes have made inputFromFile currently unusable-
+ 	 *  	related code will be commented out until fixed and commited
+ 	 */
+
+/*	if(inputFromFile){
 		simStep = 0;
 
-		/* Read full lines until end of file. 
-		 * Every iteration (line) is one simulation step.
-		 */
+
 		while(ReadFileLine(pInFile, iAppArray)) {
 			
 			simulation_array_ID = simStep%2;
@@ -244,16 +590,14 @@ int main(int argc, char *argv[]){
 				fputs(tempbuf, pOutFile);
 			}
 			
-			/* Perform_Communication() performs the inter core
-  			 * core dendrite communication with neighbouring cells
-			 * See definition for more details
-  			 */
-			perform_communication_step(sending_list_head, receiving_list_head, cellParamsPtr, cellPtr[simulation_array_ID], s_request, r_request);
-
-		
-		#pragma omp parallel for private(target_cell, iAppArray, tempbuf) shared(cellParamsPtr, cellCount, pOutFile) firstprivate(simulation_array_ID)
+		#pragma omp parallel for shared(cellParamsPtr, cellPtr) private(iAppArray, target_cell, tempbuf, i, requested_neighbour) firstprivate(simulation_array_ID)	
 			for (target_cell=0;target_cell<cellCount;target_cell++) {
 				
+				for (i=0; i<cellParamsPtr[target_cell].total_amount_of_neighbours; i++){
+                                        requested_neighbour = cellParamsPtr[target_cell].neighId[i];
+                                        cellParamsPtr[target_cell].neighVdend[i] = cellPtr[simulation_array_ID][requested_neighbour].dend.V_dend;
+				}
+
 				cellParamsPtr[target_cell].iAppIn = iAppArray[target_cell];
 				cellParamsPtr[target_cell].prevCellState = &cellPtr[simulation_array_ID][target_cell];
 				cellParamsPtr[target_cell].newCellState = &cellPtr[simulation_array_ID^1][target_cell];
@@ -261,12 +605,13 @@ int main(int argc, char *argv[]){
 				CompDend(&cellParamsPtr[target_cell], 0);
 				CompSoma(&cellParamsPtr[target_cell]);
 				CompAxon(&cellParamsPtr[target_cell]);
+
 				if (PRINTING) {
 					sprintf(tempbuf, "%.16f ", cellPtr[(simulation_array_ID)^1][target_cell].axon.V_axon);
 					fputs(tempbuf, pOutFile);
 				}
-			}
 
+			}
 			if (PRINTING) {
 				sprintf(tempbuf, "\n");
 				fputs(tempbuf,pOutFile);
@@ -277,12 +622,10 @@ int main(int argc, char *argv[]){
 		
 	}
 	else {	
-		simTime = SIMTIME; 
-		total_simulation_steps = (int)(simTime/DELTA);
-	
-		for(simStep=0;simStep<total_simulation_steps;simStep++) {
+*/		total_simulation_steps = (int)(simTime/DELTA);
 
-			simulation_array_ID = simStep%2;
+		for(simStep=0;simStep<total_simulation_steps;simStep++) {
+								
 			if ((simStep>=20000)&&(simStep<20500-1))
 				iApp = 6; 
 			else
@@ -292,688 +635,294 @@ int main(int argc, char *argv[]){
 				sprintf(tempbuf, " %d %.2f ", simStep+1, iApp);
 				fputs(tempbuf, pOutFile);
 			}
-			
-			/* Perform_Communication() performs the inter core
-  			 * core dendrite communication with neighbouring cells
-			 * See definition for more details
-  			 */
-			
-			if (cores > 1)
-				perform_communication_step(sending_list_head, receiving_list_head, cellParamsPtr, cellPtr[simulation_array_ID], s_request, r_request);
 
-			// The main parallel for: each core goes through its cells
-		#pragma omp parallel for private(j, i, requested_neighbour, r_temp, translated_cell_id, cell_id, core, last_index, found, tempbuf) firstprivate(simulation_array_ID) shared(cellParamsPtr, receiving_list_head, cellCount, cellPtr, core_id, cores, pOutFile) 			
-			for (j=0; j<cellCount; j++){
-				last_index = 0;
-				r_temp = receiving_list_head;
 
-				for (i=0; i<cellParamsPtr[j].total_amount_of_neighbours; i++) {//we will run through the neighbours of the cell
-					found = 0;
-					requested_neighbour = cellParamsPtr[j].neighId[i];	//global id of the next neighbour this cell needs
-					core = requested_neighbour/cellCount; //the core that this cell belongs to
-					while (core != r_temp->target_core){
-						r_temp = r_temp->next;
-						last_index = 0;
-					}//i locate the core's node in the list
-					if (core == core_id){
-						my_requested_cell = requested_neighbour%cellCount;
-					  	cellParamsPtr[j].neighVdend[i] = cellPtr[simulation_array_ID][my_requested_cell].dend.V_dend;
+	/* 	We shall perform core-communication to exchange voltage packages
+	 * 	We first fill the voltage-buffer needed to be sent over
+	 */ 
+
+			for (targetCore=0; targetCore<cores; targetCore++) {
+				if (targetCore==core_id) {
+					//fill the receiving Voltage buffer with our updated local cells
+					memcpy(packagesVoltToReceive[core_id], V_dend, cellCount*sizeof(mod_prec));
+					r_request[targetCore]=MPI_REQUEST_NULL;
+				} else {
+					for (package_index=0; package_index<packagesToSend[targetCore]; package_index++) {
+						requested_neighbour = packagesIndexToSend[targetCore][package_index]-core_offset;
+						packagesVoltToSend[targetCore][package_index] = V_dend[requested_neighbour];
 					}
-					else {//the cell belongs to another core
-						if (simStep == 0){	
-							while ((last_index <= r_temp->total_cells_to_receive)&&(found != 1)){
-								cell_id = r_temp->cells_to_receive[last_index];
-								translated_cell_id = cell_id + cellCount*(r_temp->target_core);//global id of the cell under examination
-								if (requested_neighbour == translated_cell_id){
-									cellParamsPtr[j].neighVdend[i] = r_temp->voltages_to_receive[last_index];
-									found = 1;
-									cellParamsPtr[j].neighSlots[i] = last_index;
-								}
-								last_index++;
-							}
-						}
-						else 
-							cellParamsPtr[j].neighVdend[i] = r_temp->voltages_to_receive[cellParamsPtr[j].neighSlots[i]];
-					}
+
+	/*	We then call MPI functions for sending the voltage-buffer and receiving
+	 *	our respective voltage-buffer
+	 */
+					if (packagesToSend[targetCore]>0)
+						MPI_Isend(packagesVoltToSend[targetCore], packagesToSend[targetCore], MPI_FLOAT, targetCore, 0, MPI_COMM_WORLD, &s_request[targetCore]);
+					if (packagesToReceive[targetCore]>0)
+						MPI_Irecv(packagesVoltToReceive[targetCore], packagesToReceive[targetCore], MPI_FLOAT, targetCore, 0, MPI_COMM_WORLD, &r_request[targetCore]);
 				}
-										
-				cellParamsPtr[j].iAppIn = iApp;			
-				cellParamsPtr[j].prevCellState = &cellPtr[simulation_array_ID][j];
-				cellParamsPtr[j].newCellState = &cellPtr[simulation_array_ID^1][j];
-				
-				CompDend(&cellParamsPtr[j], 0);
-				CompSoma(&cellParamsPtr[j]);
-				CompAxon(&cellParamsPtr[j]);
-				
-				if (PRINTING) {
-					sprintf(tempbuf, " %d : %.8f ", (core_id*cellCount+j+1), cellPtr[(simulation_array_ID)^1][j].axon.V_axon);
+			}
+			syncing(r_request);
+			cleanup_requests(r_request);
+
+	/*	First Loop takes care of Gap Junction Functions
+ 	*/			
+
+		#pragma omp parallel for shared (cellParamsPtr, packagesIndexMatcher, packagesVoltToReceive, iApp, iAppIn, V_dend, I_c, \
+		pOutFile) private(target_cell, i, requested_neighbour, targetCore, f, V, coded_package_index, decoded_package_index, \
+		voltage, I_c_storage) firstprivate(simulation_array_ID)
+			for (target_cell=0;target_cell<cellCount;target_cell++) {
+
+				if ((simStep==0)&&(target_cell==0))
+					printf("Rank %d: Executing with %d threads.\n", core_id, omp_get_num_threads());
+
+				//Feeding of Input Current
+				iAppIn[target_cell] = iApp;
+
+	/*	Gathering of the data concerning Vdend of neighours, then
+ 	*	computing and storing the incoming Ic from neighbours
+ 	*/
+
+				I_c_storage = 0;
+				__assume_aligned(cellParamsPtr.neighConductances[target_cell], 64);
+				__assume_aligned(V_dend, 64);
+				__assume_aligned(packagesIndexMatcher[target_cell], 64);
+			#pragma ivdep
+				for (i=0; i<cellParamsPtr.total_amount_of_neighbours[target_cell]; i++){
+					//get the codified index of the cell's neighbour
+					coded_package_index = packagesIndexMatcher[target_cell][i];
+					//decode the package (core) you need to read
+					targetCore = coded_package_index/cellCount;
+					//decode the index of the package-to-read
+					decoded_package_index = coded_package_index%cellCount;
+					//search the neighbour's voltage in the receiving voltage buffer
+					voltage = packagesVoltToReceive[targetCore][decoded_package_index];
+					//compute neighbour's incoming current
+					V = V_dend[target_cell] - voltage;
+					f = 0.8f * expf(-1*powf(V, 2)/100) + 0.2f;// SCHWEIGHOFER 2004 VERSION
+					I_c_storage += cellParamsPtr.neighConductances[target_cell][i] * f * V;
+                                }	
+				I_c[target_cell] = I_c_storage;
+			}
+
+	/* Second Loop computes the new state (voltages, channels etc.)
+ 	*/ 
+
+			__assume_aligned(V_dend, 64);
+			__assume_aligned(Hcurrent_q, 64);
+			__assume_aligned(Calcium_r, 64);
+			__assume_aligned(Potassium_s, 64);
+			__assume_aligned(I_CaH, 64);
+			__assume_aligned(Ca2Plus, 64);
+			__assume_aligned(I_c, 64);
+			__assume_aligned(iAppIn, 64);
+
+			__assume_aligned(V_soma, 64);
+			__assume_aligned(g_CaL, 64);
+			__assume_aligned(Sodium_m, 64);
+			__assume_aligned(Sodium_h, 64);
+			__assume_aligned(Calcium_k, 64);
+			__assume_aligned(Calcium_l, 64);
+			__assume_aligned(Potassium_n, 64);
+			__assume_aligned(Potassium_p, 64);
+			__assume_aligned(Potassium_x_s, 64);
+
+			__assume_aligned(V_axon, 64);
+			__assume_aligned(Sodium_m_a, 64);
+			__assume_aligned(Sodium_h_a, 64);
+			__assume_aligned(Potassium_x_a, 64);
+		#pragma omp parallel for simd shared (cellParamsPtr, V_dend, Hcurrent_q, Calcium_r, Potassium_s, I_CaH, Ca2Plus,\
+		iApp, iAppIn, I_c, V_soma, g_CaL, Sodium_m, Sodium_h, Calcium_k, Calcium_l, Potassium_n, Potassium_p, Potassium_x_s,\
+		V_axon, Sodium_m_a, Sodium_h_a, Potassium_x_a, pOutFile) private(target_cell, tempbuf, q_inf, tau_q, dq_dt,\
+		alpha_r, beta_r, r_inf, tau_r, dr_dt, alpha_s, beta_s, s_inf, tau_s, ds_dt, dCa_dt, I_sd, I_CaH_temp, I_K_Ca, I_ld,\
+		I_h, dVd_dt, k_inf, l_inf, tau_k, tau_l, dk_dt, dl_dt, m_inf, h_inf, tau_h, dh_dt, n_inf, p_inf, tau_n, tau_p, dn_dt,\
+		dp_dt, alpha_x_s, beta_x_s, x_inf_s, tau_x_s, dx_dt_s, I_ds, I_CaL, I_Na_s, I_ls, I_Kdr_s, I_K_s, I_as, dVs_dt,\
+		m_inf_a, h_inf_a, tau_h_a, dh_dt_a, alpha_x_a, beta_x_a, x_inf_a, tau_x_a, dx_dt_a, I_Na_a, I_la, I_sa, I_K_a,\
+		dVa_dt)	firstprivate(simulation_array_ID)
+			for (target_cell=0;target_cell<cellCount;target_cell++) {
+
+//				~DENDRITIC COMPUTATIONS~
+
+//				Dend H Current Calcs
+				q_inf = 1 /(1 + expf((V_dend[target_cell] + 80) / 4));
+			        tau_q = 1 /(expf(-0.086f * V_dend[target_cell] - 14.6f) + expf(0.070f * V_dend[target_cell] - 1.87f));
+			        dq_dt = (q_inf - Hcurrent_q[target_cell]) / tau_q;
+				Hcurrent_q[target_cell] = DELTA * dq_dt + Hcurrent_q[target_cell];
+
+//				Dend Ca Current Calcs
+				alpha_r = 1.7f / (1 + expf( -(V_dend[target_cell] - 5) / 13.9f));
+		       		beta_r = 0.02f * (V_dend[target_cell] + 8.5f) / (expf((V_dend[target_cell] + 8.5f) / 5) - 1);
+	  		     	r_inf = alpha_r / (alpha_r + beta_r);
+	       	 		tau_r = 5 / (alpha_r + beta_r);
+	       		 	dr_dt = (r_inf - Calcium_r[target_cell]) / tau_r;
+	    			Calcium_r[target_cell] = DELTA * dr_dt + Calcium_r[target_cell];
+
+//				Dend K Current Calcs
+				alpha_s = min((0.00002f * Ca2Plus[target_cell]), 0.01f);
+			        beta_s = 0.015f;
+			        s_inf = alpha_s / (alpha_s + beta_s);
+			        tau_s = 1 / (alpha_s + beta_s);
+			        ds_dt = (s_inf - Potassium_s[target_cell]) / tau_s;
+			        Potassium_s[target_cell] = DELTA * ds_dt + Potassium_s[target_cell];
+
+//				Dend Cal Current Calcs
+				dCa_dt = -3 * I_CaH[target_cell] - 0.075f * Ca2Plus[target_cell];
+				Ca2Plus[target_cell] = DELTA * dCa_dt + Ca2Plus[target_cell];
+
+//				Dendritic Voltage And Current Calcs
+				I_sd = (G_INT / (1 - P1)) * (V_dend[target_cell] - V_soma[target_cell]);
+				I_CaH_temp =G_CAH * powf(Calcium_r[target_cell], 2) * (V_dend[target_cell] - V_CA);
+				I_K_Ca =G_K_CA * Potassium_s[target_cell] * (V_dend[target_cell] - V_K);
+				I_ld =G_LD * (V_dend[target_cell] - V_L);
+				I_h=G_H * Hcurrent_q[target_cell] * (V_dend[target_cell] - V_H);
+				dVd_dt = (-(I_CaH_temp + I_sd+ I_ld + I_K_Ca + I_c[target_cell] + I_h) + iAppIn[target_cell]) / C_M;
+				I_CaH[target_cell] = I_CaH_temp;
+
+
+//				~SOMATIC COMPUTATIONS~
+
+//				Soma Calcium Calcs
+				k_inf = (1 / (1 + expf(-1 * (V_soma[target_cell] + 61) / 4.2f)));
+			        l_inf = (1 / (1 + expf(( V_soma[target_cell] + 85.5f) / 8.5f)));
+			        tau_k = 1;
+			        tau_l = ((20 * expf((V_soma[target_cell] + 160) / 30) / (1 + expf((V_soma[target_cell] + 84) / 7.3f))) +35);
+			        dk_dt = (k_inf - Calcium_k[target_cell]) / tau_k;
+			        dl_dt = (l_inf - Calcium_l[target_cell]) / tau_l;
+			        Calcium_k[target_cell] = DELTA * dk_dt + Calcium_k[target_cell];
+			        Calcium_l[target_cell] = DELTA * dl_dt + Calcium_l[target_cell];
+
+//				Soma Sodium Calcs
+				m_inf = 1 / (1 + (expf((-30 - V_soma[target_cell])/ 5.5f)));
+				h_inf = 1 / (1 + (expf((-70 - V_soma[target_cell])/-5.8f)));
+				tau_h = 3 * expf((-40 - V_soma[target_cell])/33);
+				dh_dt = (h_inf - Sodium_h[target_cell])/tau_h;
+				Sodium_m[target_cell] = m_inf;
+				Sodium_h[target_cell] = Sodium_h[target_cell] + DELTA * dh_dt;
+
+//				Soma Potassium Calcs
+				n_inf = 1 / (1 + expf( ( -3 - V_soma[target_cell]) /10));
+			        p_inf = 1 / (1 + expf( (-51 - V_soma[target_cell]) / -12));
+			        tau_n = 5 + (47 * expf( -(-50 - V_soma[target_cell]) /900));
+			        tau_p = tau_n;
+			        dn_dt = (n_inf - Potassium_n[target_cell]) / tau_n;
+			        dp_dt = (p_inf - Potassium_p[target_cell]) / tau_p;
+			        Potassium_n[target_cell] = DELTA * dn_dt + Potassium_n[target_cell];
+				Potassium_p[target_cell] = DELTA * dp_dt + Potassium_p[target_cell];
+
+//				Soma Potassium X Calcs
+				alpha_x_s = 0.13f * (V_soma[target_cell] + 25) / (1 - expf(-(V_soma[target_cell] + 25) / 10));
+			        beta_x_s= 1.69f * expf(-0.0125f * (V_soma[target_cell] + 35));
+				x_inf_s = alpha_x_s / (alpha_x_s + beta_x_s);
+				tau_x_s = 1 / (alpha_x_s + beta_x_s);
+			        dx_dt_s = (x_inf_s - Potassium_x_s[target_cell]) / tau_x_s;
+			        Potassium_x_s[target_cell] = 0.05f * dx_dt_s + Potassium_x_s[target_cell];
+
+//				Somatic Voltage And Current Calcs
+				I_ds= (G_INT / P1) * (V_soma[target_cell] - V_dend[target_cell]);
+				I_CaL = g_CaL[target_cell] * powf(Calcium_k[target_cell], 3) * Calcium_l[target_cell] * (V_soma[target_cell] - V_CA);
+				I_Na_s= G_NA_S * powf(Sodium_m[target_cell], 3) * Sodium_h[target_cell] * (V_soma[target_cell] - V_NA);
+				I_ls= G_LS * (V_soma[target_cell] - V_L);
+				I_Kdr_s = G_KDR_S * powf(Potassium_n[target_cell], 4) * (V_soma[target_cell] - V_K);
+				I_K_s = G_K_S * powf(Potassium_x_s[target_cell], 4) * (V_soma[target_cell] - V_K);
+				I_as= (G_INT / (1 - P2)) * (V_soma[target_cell] - V_axon[target_cell]);
+				dVs_dt = (-(I_CaL + I_ds+ I_as + I_Na_s + I_ls + I_Kdr_s + I_K_s)) / C_M;
+
+
+//				~AXONAL COMPUTATIONS~
+
+//				Axon Sodium Calcs
+				m_inf_a = 1 / (1 + (expf((-30 - V_axon[target_cell])/ 5.5f)));
+				h_inf_a = 1 / (1 + (expf((-60 - V_axon[target_cell])/-5.8f)));
+				tau_h_a = 1.5f * expf((-40 - V_axon[target_cell])/33);
+				dh_dt_a = (h_inf_a - Sodium_h_a[target_cell])/tau_h_a;
+				Sodium_m_a[target_cell] = m_inf_a;
+				Sodium_h_a[target_cell] = Sodium_h_a[target_cell] + DELTA * dh_dt_a;
+
+//				Axon Potassium Calcs
+				alpha_x_a = 0.13f * (V_axon[target_cell] + 25) / (1 - expf(-(V_axon[target_cell] + 25) / 10));
+			        beta_x_a= 1.69f * expf(-0.0125f * (V_axon[target_cell] + 35));
+			        x_inf_a = alpha_x_a / (alpha_x_a + beta_x_a);
+			        tau_x_a = 1 / (alpha_x_a + beta_x_a);
+			        dx_dt_a = (x_inf_a - Potassium_x_a[target_cell]) / tau_x_a;
+			        Potassium_x_a[target_cell] = 0.05f * dx_dt_a + Potassium_x_a[target_cell];
+
+//				Axonal Voltage And Current Calcs
+				I_Na_a= G_NA_A * powf(Sodium_m_a[target_cell], 3) * Sodium_h_a[target_cell] * (V_axon[target_cell] - V_NA);
+				I_la= G_LA* (V_axon[target_cell] - V_L);
+				I_sa= (G_INT / P2) * (V_axon[target_cell] - V_soma[target_cell]);
+				I_K_a = G_K_A * powf(Potassium_x_a[target_cell], 4) * (V_axon[target_cell] - V_K);
+				dVa_dt = (-(I_K_a + I_sa + I_la + I_Na_a)) / C_M;
+
+
+//				~NEW VOLTAGES~
+
+				V_dend[target_cell] = DELTA * dVd_dt + V_dend[target_cell];
+				V_soma[target_cell] = DELTA * dVs_dt + V_soma[target_cell];
+				V_axon[target_cell] = DELTA * dVa_dt + V_axon[target_cell];
+
+//				~END OF COMPUTATIONS~
+ 
+			}
+
+
+			if (PRINTING&&((simStep%1)==0)) {
+
+			#pragma omp parallel for simd shared (V_axon, pOutFile) private(target_cell, tempbuf)
+				for (target_cell=0;target_cell<cellCount;target_cell++) {
+					sprintf(tempbuf, "%d : %.8f ", target_cell+1, V_axon[target_cell]);
 					fputs(tempbuf, pOutFile);
 				}
-			}//End of for loop
 
-			if (PRINTING) {
 				sprintf(tempbuf, "\n");
 				fputs(tempbuf, pOutFile);
 			}
 		
 		}
 
-		simStep = total_simulation_steps;//so that simStep in the end has the exact value of how many steps we had in this sim, regardless of input method (useful to know which cellPtr has what)
-	}
+//	}
+
+	gettimeofday(&toc, NULL);
 		
-	/* Free  memory and close files
+	/* SIM END
+	 * Free  memory and close files
 	 */
-
-	if (PRINTSTATE) {
-		char resultFileName[50];
-		sprintf(resultFileName, "results/lastStateDump%d.txt", core_id);
-		printState(cellPtr[simStep%2], resultFileName);		//simStep%2 here should refer to the cellPtr which has the last state of the network that we calculated
-	}
-
-	free(cellPtr[0]);
-	cellPtr[0] = NULL;
-	free(cellPtr[1]);
-	cellPtr[1] = NULL;
-	free(cellPtr);
-	cellPtr = NULL;
-
-	for (j=0; j<cellCount; j++) {
-		free(cellParamsPtr[j].neighVdend);
-		free(cellParamsPtr[j].neighConductances);
-		free(cellParamsPtr[j].neighId);
-		free(cellParamsPtr[j].neighSlots);
-	}
-	free(cellParamsPtr);
-	cellParamsPtr = NULL;
-
-	sending_node* the_deleter = sending_list_head;
-	while (sending_list_head!=NULL) {
-		sending_list_head = sending_list_head->next;
-		free(the_deleter->cells_to_send);
-		free(the_deleter->voltages_to_send);
-		free(the_deleter);
-		the_deleter = sending_list_head;
-	}
-	receiving_node* the_deleter2 = receiving_list_head;
-	while (sending_list_head!=NULL) {
-                receiving_list_head = receiving_list_head->next;
-		free(the_deleter2->cells_to_receive);
-                free(the_deleter2->voltages_to_receive);
-                free(the_deleter2);
-                the_deleter2 = receiving_list_head;
-        }
-	
-	free(s_request);
-	s_request = NULL;
-	free(r_request);
-	r_request = NULL;
 
 	if (PRINTING) {
 		fclose (pOutFile);
 		chmod(outFileName,0x01B6);
 	}
 
-	if(inputFromFile) {
+	if(inputFromFile)
 		fclose (pInFile);
-		free(iAppArray);
+
+	/* Execution Time for the Sim
+	 */
+
+	printf("Execution Time for Simulation: %0.2f ms.\n", ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
+		(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
+	if (PRINTING) {
+		pOutFile = fopen (outFileName, "rb+");
+		sprintf(tempbuf, "Execution Time for Simulation in ms: %0.2f\n", \
+			((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
+			(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
+                fputs(tempbuf, pOutFile);
+		fclose (pOutFile);
 	}
 
-	MPI_Finalize();	
+	MPI_Finalize();
 	return 0;
-}
-
-
-
-
-//DENDRITIC COMPUTATIONAL PART ------------------
-
-
-//Function that will be called from the Phi
-void CompDend(cellCompParams *cellParamsPtr, int randomness){
-
-	struct channelParams chPrms;
-	struct dendCurrVoltPrms chComps;
-
-	//printf("Dendrite ");
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->dend.V_dend;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->dend.Hcurrent_q;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->dend.Hcurrent_q;
-	//Compute
-	DendHCurr(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->dend.V_dend;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->dend.Calcium_r;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->dend.Calcium_r;
-	//Compute
-	DendCaCurr(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->dend.Potassium_s;
-	chPrms.prevComp2 = &cellParamsPtr->prevCellState->dend.Ca2Plus;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->dend.Potassium_s;
-	//Compute
-	DendKCurr(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->dend.Ca2Plus;
-	chPrms.prevComp2 = &cellParamsPtr->prevCellState->dend.I_CaH;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->dend.Ca2Plus;
-	//Compute
-	DendCal(&chPrms);
-
-	//in random initialization mode, cells run in closed circuit mode so neighboring current equals zero
-	if (randomness==1)
-		chComps.iC = 0;
-	else
-		chComps.iC = IcNeighbors(cellParamsPtr->neighVdend, cellParamsPtr->neighConductances, cellParamsPtr->prevCellState->dend.V_dend, cellParamsPtr->total_amount_of_neighbours);
-	
-	chComps.iApp = &cellParamsPtr->iAppIn;
-	chComps.vDend = &cellParamsPtr->prevCellState->dend.V_dend;
-	chComps.newVDend = &cellParamsPtr->newCellState->dend.V_dend;
-	chComps.vSoma = &cellParamsPtr->prevCellState->soma.V_soma;
-	chComps.q = &cellParamsPtr->newCellState->dend.Hcurrent_q;
-	chComps.r = &cellParamsPtr->newCellState->dend.Calcium_r;
-	chComps.s = &cellParamsPtr->newCellState->dend.Potassium_s;
-	chComps.newI_CaH = &cellParamsPtr->newCellState->dend.I_CaH;
-	DendCurrVolt(&chComps);
-
-	return;
-}
-
-void DendHCurr(struct channelParams *chPrms){
-
-	mod_prec q_inf, tau_q, dq_dt, q_local;
-
-	//Get inputs
-	mod_prec prevV_dend = *chPrms->v;
-	mod_prec prevHcurrent_q = *chPrms->prevComp1;
-
-	// Update dendritic H current component
-	q_inf = 1 /(1 + exp((prevV_dend + 80) / 4));
-	tau_q = 1 /(exp(-0.086 * prevV_dend - 14.6) + exp(0.070 * prevV_dend - 1.87));
-	dq_dt = (q_inf - prevHcurrent_q) / tau_q;
-	q_local = DELTA * dq_dt + prevHcurrent_q;
-	//Put result
-	*chPrms->newComp1 = q_local;
-
-	return;
-}
-
-void DendCaCurr(struct channelParams *chPrms){
-
-	mod_prec alpha_r, beta_r, r_inf, tau_r, dr_dt, r_local;
-
-	//Get inputs
-	mod_prec prevV_dend = *chPrms->v;
-	mod_prec prevCalcium_r = *chPrms->prevComp1;
-
-	// Update dendritic high-threshold Ca current component
-	alpha_r = 1.7 / (1 + exp( -(prevV_dend - 5) / 13.9));
-	beta_r = 0.02 * (prevV_dend + 8.5) / (exp((prevV_dend + 8.5) / 5) - 1);
-	r_inf = alpha_r / (alpha_r + beta_r);
-	tau_r = 5 / (alpha_r + beta_r);
-	dr_dt = (r_inf - prevCalcium_r) / tau_r;
-	r_local = DELTA * dr_dt + prevCalcium_r;
-	//Put result
-	*chPrms->newComp1 = r_local;
-
-	return;
-}
-
-void DendKCurr(struct channelParams *chPrms){
-
-	mod_prec alpha_s, beta_s, s_inf, tau_s, ds_dt, s_local;
-
-	//Get inputs
-	mod_prec prevPotassium_s = *chPrms->prevComp1;
-	mod_prec prevCa2Plus = *chPrms->prevComp2;
-
-	// Update dendritic Ca-dependent K current component
-	alpha_s = min((0.00002*prevCa2Plus), 0.01);
-	beta_s = 0.015;
-	s_inf = alpha_s / (alpha_s + beta_s);
-	tau_s = 1 / (alpha_s + beta_s);
-	ds_dt = (s_inf - prevPotassium_s) / tau_s;
-	s_local = DELTA * ds_dt + prevPotassium_s;
-	//Put result
-	*chPrms->newComp1 = s_local;
-
-	return;
-}
-
-//Consider merging DendCal into DendKCurr since DendCal's output doesn't go to DendCurrVolt but to DendKCurr
-void DendCal(struct channelParams *chPrms){
-
-	mod_prec dCa_dt, Ca2Plus_local;
-
-	//Get inputs
-	mod_prec prevCa2Plus = *chPrms->prevComp1;
-	mod_prec prevI_CaH = *chPrms->prevComp2;
-
-	// update Calcium concentration
-	dCa_dt = -3 * prevI_CaH - 0.075 * prevCa2Plus;
-	Ca2Plus_local = DELTA * dCa_dt + prevCa2Plus;
-	//Put result
-	*chPrms->newComp1 = Ca2Plus_local;//This state value is read in DendKCurr
-
-	return;
-}
-
-void DendCurrVolt(struct dendCurrVoltPrms *chComps){
-
-	//Loca variables
-	mod_prec I_sd, I_CaH, I_K_Ca, I_ld, I_h, dVd_dt;
-
-	//Get inputs
-	mod_prec I_c = chComps->iC;
-	mod_prec I_app = *chComps->iApp;
-	mod_prec prevV_dend = *chComps->vDend;
-	mod_prec prevV_soma = *chComps->vSoma;
-	mod_prec q = *chComps->q;
-	mod_prec r = *chComps->r;
-	mod_prec s = *chComps->s;
-
-	// DENDRITIC CURRENTS
-
-	// Soma-dendrite interaction current I_sd
-	I_sd = (G_INT / (1 - P1)) * (prevV_dend - prevV_soma);
-	// Inward high-threshold Ca current I_CaH
-	I_CaH=G_CAH * r * r * (prevV_dend - V_CA);
-	// Outward Ca-dependent K current I_K_Ca
-	I_K_Ca =G_K_CA * s * (prevV_dend - V_K);
-	// Leakage current I_ld
-	I_ld =G_LD * (prevV_dend - V_L);
-	// Inward anomalous rectifier I_h
-	I_h=G_H * q * (prevV_dend - V_H);
-
-	dVd_dt = (-(I_CaH + I_sd+ I_ld + I_K_Ca + I_c + I_h) + I_app) / C_M;
-
-	//Put result (update V_dend)
-	*chComps->newVDend = DELTA * dVd_dt + prevV_dend;
-	*chComps->newI_CaH = I_CaH;//This is a state value read in DendCal
-	return;
-}
-
-mod_prec IcNeighbors(mod_prec *neighVdend, mod_prec *neighConductances, mod_prec prevV_dend, int neighbors){
-
-	int i;
-	mod_prec f, V, Cond, I_c=0;
-	for(i=0;i<neighbors;i++){
-		V = prevV_dend - neighVdend[i];
-		f = 0.8 * exp(-1*pow(V, 2)/100) + 0.2;// SCHWEIGHOFER 2004 VERSION
-		Cond = neighConductances[i];
-		I_c = I_c + (Cond * f * V);
-	}
-
-	return I_c;
-}
-
-//SOMATIC COMPUTATIONAL PART -----------------
-
-void CompSoma(cellCompParams *cellParamsPtr){
-
-	struct channelParams chPrms;
-	struct somaCurrVoltPrms chComps;
-
-	// update somatic components
-	// SCHWEIGHOFER:
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->soma.V_soma;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->soma.Calcium_k;
-	chPrms.prevComp2 = &cellParamsPtr->prevCellState->soma.Calcium_l;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->soma.Calcium_k;
-	chPrms.newComp2 = &cellParamsPtr->newCellState->soma.Calcium_l;
-	//Compute
-	SomaCalcium(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->soma.V_soma;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->soma.Sodium_m;
-	chPrms.prevComp2 = &cellParamsPtr->prevCellState->soma.Sodium_h;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->soma.Sodium_m;
-	chPrms.newComp2 = &cellParamsPtr->newCellState->soma.Sodium_h;
-	//Compute
-	SomaSodium(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->soma.V_soma;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->soma.Potassium_n;
-	chPrms.prevComp2 = &cellParamsPtr->prevCellState->soma.Potassium_p;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->soma.Potassium_n;
-	chPrms.newComp2 = &cellParamsPtr->newCellState->soma.Potassium_p;
-	//Compute
-	SomaPotassium(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->soma.V_soma;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->soma.Potassium_x_s;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->soma.Potassium_x_s;
-	//Compute
-	SomaPotassiumX(&chPrms);
-
-	chComps.g_CaL = &cellParamsPtr->prevCellState->soma.g_CaL;
-	chComps.vDend = &cellParamsPtr->prevCellState->dend.V_dend;
-	chComps.vSoma = &cellParamsPtr->prevCellState->soma.V_soma;
-	chComps.newVSoma = &cellParamsPtr->newCellState->soma.V_soma;
-	chComps.vAxon = &cellParamsPtr->prevCellState->axon.V_axon;
-	chComps.k = &cellParamsPtr->newCellState->soma.Calcium_k;
-	chComps.l = &cellParamsPtr->newCellState->soma.Calcium_l;
-	chComps.m = &cellParamsPtr->newCellState->soma.Sodium_m;
-	chComps.h = &cellParamsPtr->newCellState->soma.Sodium_h;
-	chComps.n = &cellParamsPtr->newCellState->soma.Potassium_n;
-	chComps.x_s = &cellParamsPtr->newCellState->soma.Potassium_x_s;
-	SomaCurrVolt(&chComps);
-
-	return;
-}
-
-void SomaCalcium(struct channelParams *chPrms){
-
-	mod_prec k_inf, l_inf, tau_k, tau_l, dk_dt, dl_dt, k_local, l_local;
-
-	//Get inputs
-	mod_prec prevV_soma = *chPrms->v;
-	mod_prec prevCalcium_k = *chPrms->prevComp1;
-	mod_prec prevCalcium_l = *chPrms->prevComp2;
-
-	k_inf = (1 / (1 + exp(-1 * (prevV_soma + 61) / 4.2)));
-	l_inf = (1 / (1 + exp(( prevV_soma + 85.5) / 8.5)));
-	tau_k = 1;
-	tau_l = ((20 * exp((prevV_soma + 160) / 30) / (1 + exp((prevV_soma + 84) / 7.3))) +35);
-	dk_dt = (k_inf - prevCalcium_k) / tau_k;
-	dl_dt = (l_inf - prevCalcium_l) / tau_l;
-	k_local = DELTA * dk_dt + prevCalcium_k;
-	l_local = DELTA * dl_dt + prevCalcium_l;
-	//Put result
-	*chPrms->newComp1= k_local;
-	*chPrms->newComp2= l_local;
-
-	return;
-}
-
-void SomaSodium(struct channelParams *chPrms){
-
-	mod_prec m_inf, h_inf, tau_h, dh_dt, m_local, h_local;
-
-	//Get inputs
-	mod_prec prevV_soma = *chPrms->v;
-	//mod_prec prevSodium_m = *chPrms->prevComp1;
-	mod_prec prevSodium_h = *chPrms->prevComp2;
-
-	// RAT THALAMOCORTICAL SODIUM:
-	m_inf = 1 / (1 + (exp((-30 - prevV_soma)/ 5.5)));
-	h_inf = 1 / (1 + (exp((-70 - prevV_soma)/-5.8)));
-	tau_h = 3 * exp((-40 - prevV_soma)/33);
-	dh_dt = (h_inf - prevSodium_h)/tau_h;
-	m_local = m_inf;
-	h_local = prevSodium_h + DELTA * dh_dt;
-	//Put result
-	*chPrms->newComp1 = m_local;
-	*chPrms->newComp2 = h_local;
-
-	return;
-}
-
-void SomaPotassium(struct channelParams *chPrms){
-
-	mod_prec n_inf, p_inf, tau_n, tau_p, dn_dt, dp_dt, n_local, p_local;
-
-	//Get inputs
-	mod_prec prevV_soma = *chPrms->v;
-	mod_prec prevPotassium_n = *chPrms->prevComp1;
-	mod_prec prevPotassium_p = *chPrms->prevComp2;
-
-	// NEOCORTICAL
-	n_inf = 1 / (1 + exp( ( -3 - prevV_soma) /10));
-	p_inf = 1 / (1 + exp( (-51 - prevV_soma) / -12));
-	tau_n = 5 + (47 * exp( -(-50 - prevV_soma) /900));
-	tau_p = tau_n;
-	dn_dt = (n_inf - prevPotassium_n) / tau_n;
-	dp_dt = (p_inf - prevPotassium_p) / tau_p;
-	n_local = DELTA * dn_dt + prevPotassium_n;
-	p_local = DELTA * dp_dt + prevPotassium_p;
-	//Put result
-	*chPrms->newComp1 = n_local;
-	*chPrms->newComp2 = p_local;
-
-	return;
-}
-
-void SomaPotassiumX(struct channelParams *chPrms){
-
-	mod_prec alpha_x_s, beta_x_s, x_inf_s, tau_x_s, dx_dt_s, x_s_local;
-
-	//Get inputs
-	mod_prec prevV_soma = *chPrms->v;
-	mod_prec prevPotassium_x_s = *chPrms->prevComp1;
-
-	// Voltage-dependent (fast) potassium
-	alpha_x_s = 0.13 * (prevV_soma + 25) / (1 - exp(-(prevV_soma + 25) / 10));
-	beta_x_s= 1.69 * exp(-0.0125 * (prevV_soma + 35));
-	x_inf_s = alpha_x_s / (alpha_x_s + beta_x_s);
-	tau_x_s = 1 / (alpha_x_s + beta_x_s);
-	dx_dt_s = (x_inf_s - prevPotassium_x_s) / tau_x_s;
-	x_s_local = 0.05 * dx_dt_s + prevPotassium_x_s;
-	//Put result
-	*chPrms->newComp1 = x_s_local;
-
-	return;
-}
-
-void SomaCurrVolt(struct somaCurrVoltPrms *chComps){
-
-	//Local variables
-	mod_prec I_ds, I_CaL, I_Na_s, I_ls, I_Kdr_s, I_K_s, I_as, dVs_dt;
-
-	//Get inputs
-	mod_prec g_CaL = *chComps->g_CaL;
-	mod_prec prevV_dend = *chComps->vDend;
-	mod_prec prevV_soma = *chComps->vSoma;
-	mod_prec prevV_axon = *chComps->vAxon;
-	mod_prec k = *chComps->k;
-	mod_prec l = *chComps->l;
-	mod_prec m = *chComps->m;
-	mod_prec h = *chComps->h;
-	mod_prec n = *chComps->n;
-	mod_prec x_s = *chComps->x_s;
-
-	// SOMATIC CURRENTS
-
-	// Dendrite-soma interaction current I_ds
-	I_ds= (G_INT / P1) * (prevV_soma - prevV_dend);
-	// Inward low-threshold Ca current I_CaL
-	I_CaL = g_CaL * k * k * k * l * (prevV_soma - V_CA); //k^3
-	// Inward Na current I_Na_s
-	I_Na_s= G_NA_S * m * m * m * h * (prevV_soma - V_NA);
-	// Leakage current I_ls
-	I_ls= G_LS * (prevV_soma - V_L);
-	// Outward delayed potassium current I_Kdr
-	I_Kdr_s = G_KDR_S * n * n * n * n * (prevV_soma - V_K); // SCHWEIGHOFER
-	// I_K_s
-	I_K_s = G_K_S * pow(x_s, 4) * (prevV_soma - V_K);
-	// Axon-soma interaction current I_as
-	I_as= (G_INT / (1 - P2)) * (prevV_soma - prevV_axon);
-
-	dVs_dt = (-(I_CaL + I_ds+ I_as + I_Na_s + I_ls + I_Kdr_s + I_K_s)) / C_M;
-	*chComps->newVSoma = DELTA * dVs_dt + prevV_soma;
-
-	return;
-}
-
-//AXONAL COMPUTATIONAL PART -------------------
-
-void CompAxon(cellCompParams *cellParamsPtr){
-
-	struct channelParams chPrms;
-	struct axonCurrVoltPrms chComps;
-
-	// update somatic components
-	// SCHWEIGHOFER:
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->axon.V_axon;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->axon.Sodium_h_a;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->axon.Sodium_h_a;
-	chPrms.newComp2 = &cellParamsPtr->newCellState->axon.Sodium_m_a;
-	//Compute
-	AxonSodium(&chPrms);
-
-	//Prepare pointers to inputs/outputs
-	chPrms.v = &cellParamsPtr->prevCellState->axon.V_axon;
-	chPrms.prevComp1 = &cellParamsPtr->prevCellState->axon.Potassium_x_a;
-	chPrms.newComp1 = &cellParamsPtr->newCellState->axon.Potassium_x_a;
-	//Compute
-	AxonPotassium(&chPrms);
-
-	//Get inputs
-	chComps.vSoma = &cellParamsPtr->prevCellState->soma.V_soma;
-	chComps.vAxon = &cellParamsPtr->prevCellState->axon.V_axon;
-	chComps.newVAxon = &cellParamsPtr->newCellState->axon.V_axon;
-	chComps.m_a = &cellParamsPtr->newCellState->axon.Sodium_m_a;
-	chComps.h_a = &cellParamsPtr->newCellState->axon.Sodium_h_a;
-	chComps.x_a = &cellParamsPtr->newCellState->axon.Potassium_x_a;
-	AxonCurrVolt(&chComps);
-
-	return;
-}
-
-void AxonSodium(struct channelParams *chPrms){
-
-	mod_prec m_inf_a, h_inf_a, tau_h_a, dh_dt_a, m_a_local, h_a_local;
-
-	//Get inputs
-	mod_prec prevV_axon = *chPrms->v;
-	mod_prec prevSodium_h_a = *chPrms->prevComp1;
-
-	// Update axonal Na components
-	// NOTE: current has shortened inactivation to account for high
-	// firing frequencies in axon hillock
-	m_inf_a = 1 / (1 + (exp((-30 - prevV_axon)/ 5.5)));
-	h_inf_a = 1 / (1 + (exp((-60 - prevV_axon)/-5.8)));
-	tau_h_a = 1.5 * exp((-40 - prevV_axon)/33);
-	dh_dt_a = (h_inf_a - prevSodium_h_a)/tau_h_a;
-	m_a_local = m_inf_a;
-	h_a_local = prevSodium_h_a + DELTA * dh_dt_a;
-	//Put result
-	*chPrms->newComp1 = h_a_local;
-	*chPrms->newComp2 = m_a_local;
-
-	return;
-}
-
-void AxonPotassium(struct channelParams *chPrms){
-
-	mod_prec alpha_x_a, beta_x_a, x_inf_a, tau_x_a, dx_dt_a, x_a_local;
-
-	//Get inputs
-	mod_prec prevV_axon = *chPrms->v;
-	mod_prec prevPotassium_x_a = *chPrms->prevComp1;
-
-	// D'ANGELO 2001 -- Voltage-dependent potassium
-	alpha_x_a = 0.13 * (prevV_axon + 25) / (1 - exp(-(prevV_axon + 25) / 10));
-	beta_x_a= 1.69 * exp(-0.0125 * (prevV_axon + 35));
-	x_inf_a = alpha_x_a / (alpha_x_a + beta_x_a);
-	tau_x_a = 1 / (alpha_x_a + beta_x_a);
-	dx_dt_a = (x_inf_a - prevPotassium_x_a) / tau_x_a;
-	x_a_local = 0.05 * dx_dt_a + prevPotassium_x_a;
-	//Put result
-	*chPrms->newComp1 = x_a_local;
-
-	return;
-}
-
-void AxonCurrVolt(struct axonCurrVoltPrms *chComps){
-
-	//Local variable
-	mod_prec I_Na_a, I_la, I_sa, I_K_a, dVa_dt;
-
-	//Get inputs
-	mod_prec prevV_soma = *chComps->vSoma;
-	mod_prec prevV_axon = *chComps->vAxon;
-	mod_prec m_a = *chComps->m_a;
-	mod_prec h_a = *chComps->h_a;
-	mod_prec x_a = *chComps->x_a;
-
-	// AXONAL CURRENTS
-	// Sodium
-	I_Na_a= G_NA_A* m_a * m_a * m_a * h_a * (prevV_axon - V_NA);
-	// Leak
-	I_la= G_LA* (prevV_axon - V_L);
-	// Soma-axon interaction current I_sa
-	I_sa= (G_INT / P2) * (prevV_axon - prevV_soma);
-	// Potassium (transient)
-	I_K_a = G_K_A * pow(x_a, 4) * (prevV_axon - V_K);
-	dVa_dt = (-(I_K_a + I_sa + I_la + I_Na_a)) / C_M;
-	*chComps->newVAxon = DELTA * dVa_dt + prevV_axon;
-
-	return;
-}
-
-//Initialization Function, important ! --------------------------
-
-void initState(cellState *cellPtr){
-
-	int i, j;
-	cellState initState;
-	//Initial dendritic parameters
-	initState.dend.V_dend = -60;
-	initState.dend.Calcium_r = 0.0112788;// High-threshold calcium
-	initState.dend.Potassium_s = 0.0049291;// Calcium-dependent potassium
-	initState.dend.Hcurrent_q = 0.0337836;// H current
-	initState.dend.Ca2Plus = 3.7152;// Calcium concentration
-	initState.dend.I_CaH = 0.5;// High-threshold calcium current
-	//Initial somatic parameters
-	initState.soma.g_CaL = 0.68; //default arbitrary value but it should be randomized per cell
-	initState.soma.V_soma = -60;
-	initState.soma.Sodium_m = 1.0127807;// Sodium (artificial)
-	initState.soma.Sodium_h = 0.3596066;
-	initState.soma.Potassium_n = 0.2369847;// Potassium (delayed rectifier)
-	initState.soma.Potassium_p = 0.2369847;
-	initState.soma.Potassium_x_s = 0.1;// Potassium (voltage-dependent)
-	initState.soma.Calcium_k = 0.7423159;// Low-threshold calcium
-	initState.soma.Calcium_l = 0.0321349;
-	// Initial axonal parameters
-	initState.axon.V_axon = -60;
-	//sisaza: Sodium_m_a doesn't have a state, therefore this assignment doesn'thave any effect
-	initState.axon.Sodium_m_a = 0.003596066;// Sodium (thalamocortical)
-	initState.axon.Sodium_h_a = 0.9;
-	initState.axon.Potassium_x_a = 0.2369847;// Potassium (transient)
-
-//	initState.cell_x=0;
-//	initState.cell_y=0; //Initial irrelevant value of compartment's ID and coords
-	initState.cellID= core_id * cellCount;	//Compute the cellID of the first cell in this core
-
-	//Copy init state to all cell states and calculate their coords
-	for(j=0;j<cellCount;j++){
-//		initState.cell_x= initState.cellID / IO_NETWORK_DIM2;		//we assume that dim1 refers to the number of ROWS and dim2 refers to COLUMNS !!!!
-//		initState.cell_y= initState.cellID % IO_NETWORK_DIM2;	
-		memcpy(&cellPtr[j], &initState, sizeof(cellState));
-		initState.cellID ++;				//next cell's ID is increased by 1
-	}
-
-	if (G_CAL_FROM_FILE)
-		read_g_CaL_from_file(cellPtr);
-
-//	free(&initState);	
-	return;
 }
 
 int ReadFileLine(FILE *pInFile, mod_prec *iAppArray){
 
-//	gettimeofday(&tic, NULL);
 	char c= fpeek(pInFile);
 	if (c==EOF)
 		return 0;
 	
 	char *strNumber;
-	int bufSize = cores*cellCount*20;	//more than enough but will do for nao
-	char* buffer = (char*) malloc(bufSize*sizeof(char));
+	int bufSize = cellCount*20;	//more than enough but will do for nao
+	char* buffer = (char*) _mm_malloc(bufSize*sizeof(char), 64);
 
-	int floats_ignored = core_id*cellCount;
+	int floats_ignored = 0;
 	int floats_needed = cellCount;
 	int useful_element_found = 0;
 	//int i will stand for elements already processed, hence it starts at 0 even after the first strtok
@@ -1006,8 +955,6 @@ int ReadFileLine(FILE *pInFile, mod_prec *iAppArray){
 			exit(EXIT_FAILURE);
 		}
 		free(buffer);
-//		gettimeofday(&toc, NULL);
-//		subtract_and_add(&intime, &tic, &toc);
 		return 1;//success
 	}else{
 		if(!feof(pInFile)){
@@ -1015,60 +962,19 @@ int ReadFileLine(FILE *pInFile, mod_prec *iAppArray){
 			exit(EXIT_FAILURE);
 		}
 		free(buffer);
-//		gettimeofday(&toc, NULL);
-  //              subtract_and_add(&intime, &tic, &toc);
 		return 0;//end of file
 	}
 }
 
-void read_g_CaL_from_file(cellState* cellPtr) {
+void read_g_CaL_from_file(mod_prec* g_cal) {
 
-	mod_prec trash=0;
 	int i;
 
 	FILE* fd = fopen("gcal_file.txt","r");
-	for (i=0;i<(cellCount*core_id);i++)
-		fscanf(fd, "%lf ", &trash);
 	for (i=0;i<cellCount;i++) 
-		fscanf(fd, "%lf ", &cellPtr[i].soma.g_CaL);
+		fscanf(fd, "%f ", &g_cal[i]);
 	fclose(fd);
 
-	return;
-
-}
-
-void printState(cellState* cellPtr, char* filename) {
-
-	FILE* fd = fopen(filename, "w");
-	mod_prec* s = (mod_prec*) malloc(16*sizeof(mod_prec));
-	int i, j;
-
-	for (i=0; i<cellCount; i++) {
-
-		s[0] = cellPtr[i].soma.V_soma;
-		s[1] = cellPtr[i].soma.Sodium_m;
-		s[2] = cellPtr[i].soma.Potassium_n;
-		s[3] = cellPtr[i].soma.Potassium_x_s;
-		s[4] = cellPtr[i].soma.Calcium_k;
-		s[5] = cellPtr[i].soma.Calcium_l;
-		s[6] = cellPtr[i].dend.V_dend;
-		s[7] = cellPtr[i].dend.Calcium_r;
-		s[8] = cellPtr[i].dend.Potassium_s;
-		s[9] = cellPtr[i].dend.Hcurrent_q;
-		s[10] = cellPtr[i].dend.Ca2Plus;
-		s[11] = cellPtr[i].dend.I_CaH;
-		s[12] = cellPtr[i].axon.V_axon;
-		s[13] = cellPtr[i].axon.Sodium_m_a;
-		s[14] = cellPtr[i].axon.Sodium_h_a;
-		s[15] = cellPtr[i].axon.Potassium_x_a;
-
-		for (j=0; j<16; j++)
-			fprintf(fd, "%.8lf ", s[j]);
-		fprintf(fd, "\n");
-
-	}
-
-	fclose(fd);
 	return;
 
 }
@@ -1078,378 +984,6 @@ inline mod_prec min(mod_prec a, mod_prec b){
 	return (a < b) ? a : b;
 }
 
-sending_node* Make_Core_Communication_List_newest_format (char *filename, cellCompParams *core_cells) {
-
-/*
- * Fair Warning: This function is designed as a way to use conductivity matrixes, which seem to be mandatory now, instead of the old
- * communication format. A conductivity matrix basically describes that cell x in rows sends to cell y in columns via a conductivity value z = conductivity_matrix[x][y].
- * The matrix does not have to be symmetrical. Actually the only limit assumed here is that conductivity_matrix[i][i]==0 (no self-feeding for InfOli cells).
- * This function builds a sending list and the necessary receiving buffers of the cellCompParams structure. The new sending list should behave much better since now
- * all cells that need to be sent from one core to the other are BUNDLED TOGETHER, so that we can send all of them in one go (and not sending
- * duplicates of the same cell to the same core either). Read below for functions completing communication based on the structures designed here.
-*/
-	FILE *input_file = fopen(filename,"r");
-	sending_node *temporary = NULL, *list_head = NULL;
-	int i, k, my_cell, my_sending_cell, core_to_send, line_counter, my_cell_lower_bound = cellCount*core_id, my_cell_upper_bound = my_cell_lower_bound + cellCount;
-	int* my_neighbour_count = (int*) calloc(cellCount, sizeof(int));
-	mod_prec cond_value;
-
-	//this list has one node for every core employed, detailing which cells must be sent to each core. The node that corresponds to this core will be kept blank
-	list_head = (sending_node*) malloc(1*sizeof(sending_node));
-	list_head->target_core = 0;
-	list_head->next = NULL;
-	list_head->total_cells_to_send = 0;
-	list_head->cells_to_send = NULL;
-	list_head->voltages_to_send = NULL;
-	temporary = list_head;
-
-	for (i=1;i<cores;i++) {
-		temporary->next = (sending_node*) malloc(1*sizeof(sending_node));
-		temporary = temporary->next;
-		temporary->target_core = i;
-		temporary->next = NULL;
-            	temporary->total_cells_to_send = 0;
-               	temporary->cells_to_send = NULL;
-		temporary->voltages_to_send = NULL;
-	}
-
-	//it is important to keep in mind that the matrix is read as if cell in ROW is sending information to cell in COLUMN!
-
-	for (line_counter=0;line_counter<IO_NETWORK_SIZE;line_counter++) {
-
-		temporary = list_head;				//before examining every (supposedly sending) line, we reset temporary to the beginning of our sending list
-		for (i=0; i<IO_NETWORK_SIZE; i++) {
-
-			fscanf(input_file, "%lf ", &cond_value);
-			if (cond_value==0)						//this connection is considered not existing if conductance = 0
-				;
-			else {
-
-			//part of the code handling RECEIVING and noting which of my cells needs input from which other cells, from ANY core
-
-				if ((i>=my_cell_lower_bound)&&(i<my_cell_upper_bound)) {				//these are this core's cells' COLUMNS (incoming)
-					my_cell = i%cellCount;
-					if (my_neighbour_count[my_cell]==0) {                  //if this is the first neighbour, initialize buffers
-						core_cells[my_cell].neighVdend = NULL;
-						core_cells[my_cell].neighConductances = NULL;
-						core_cells[my_cell].neighId = NULL;
-						core_cells[my_cell].neighSlots = NULL;
-					}
-
-					core_cells[my_cell].neighId = allocate_space_int(core_cells[my_cell].neighId, my_neighbour_count[my_cell]);
-					core_cells[my_cell].neighId[my_neighbour_count[my_cell]] = line_counter;		//which cell sends this voltage to us (GLOBAL ID)
-					core_cells[my_cell].neighSlots = allocate_space_int(core_cells[my_cell].neighSlots, my_neighbour_count[my_cell]);
-					core_cells[my_cell].neighSlots[my_neighbour_count[my_cell]] = -1;		//structure to accelerate unpacking process, read comm function
-					core_cells[my_cell].neighConductances = allocate_space_mod(core_cells[my_cell].neighConductances, my_neighbour_count[my_cell]);
-					core_cells[my_cell].neighConductances[my_neighbour_count[my_cell]] = cond_value;	//what conductance we use to calculate its impact
-
-					//allocate space for storing this voltage
-					core_cells[my_cell].neighVdend = allocate_space_mod(core_cells[my_cell].neighVdend, my_neighbour_count[my_cell]);
-
-					my_neighbour_count[my_cell]++;						//how many neighbours this cell has so far (from ANY core)
-					core_cells[my_cell].total_amount_of_neighbours = my_neighbour_count[my_cell];
-				}
-
-			//part of the code handling SENDING and bundling together my cells I need to send each core
-
-				if ((line_counter>=my_cell_lower_bound)&&(line_counter<my_cell_upper_bound)) {		//these are this core's cells' ROWS (outgoing)
-					core_to_send = i/cellCount;							//which core I need to send to
-					while ((temporary!=NULL)&&(temporary->target_core!=core_to_send))		//search for the right list node
-						temporary = temporary->next;
-
-					if (core_to_send==core_id)							//Obviously I do not send to my own core
-						;
-					else if (temporary!=NULL) {
-						k = temporary->total_cells_to_send;
-						my_sending_cell = line_counter%cellCount;
-
-						if ((k>0)&&(temporary->cells_to_send[k-1]==my_sending_cell))		//I have already marked this cell to send core_to_send
-							;
-						else {
-							//add this cell to the core_to_send's cells_to_send-array ->WITH LOCAL ID<-
-							temporary->cells_to_send = allocate_space_int(temporary->cells_to_send, temporary->total_cells_to_send);
-							temporary->cells_to_send[k] = my_sending_cell;
-							temporary->voltages_to_send = allocate_space_mod(temporary->voltages_to_send, temporary->total_cells_to_send);
-							temporary->total_cells_to_send++;
-						}
-					}
-				}
-
-			//end of the code handling proper list and buffer creation concerning communication
-
-			}
-		}
-
-	}
-
-	free(my_neighbour_count);
-	fclose(input_file);
-	temporary=NULL;
-
-	return list_head;
-
-}
-
-sending_node* Make_Core_Communication_List_compressed_format (char *filename, cellCompParams *core_cells) {
-
-/* creating the communication list for the core when the input format of the connections map file is
- * sparse matrix compression
- */
-
-	FILE *input_file = fopen(filename,"r");
-	char c = fpeek(input_file);
-	sending_node *temporary = NULL, *list_head = NULL;
-	int i, send_cell, rec_cell, my_cell, core_to_send, cells_marked_for_sending, last_cell_marked, my_cell_lower_bound = cellCount*core_id, my_cell_upper_bound = my_cell_lower_bound+cellCount;
-	int* my_neighbour_count = (int*) calloc(cellCount, sizeof(int));
-	mod_prec cond_value;
-
-	 //this list has one node for every core employed, detailing which cells must be sent to each core. The node that corresponds to this core will be kept blank
-	list_head = (sending_node*) malloc(1*sizeof(sending_node));
-	list_head->target_core = 0;
-	list_head->next = NULL;
-	list_head->total_cells_to_send = 0;
-	list_head->cells_to_send = NULL;
-	list_head->voltages_to_send = NULL;
-	temporary = list_head;
-
-	for (i=1;i<cores;i++) {
-		temporary->next = (sending_node*) malloc(1*sizeof(sending_node));
-		temporary = temporary->next;
-		temporary->target_core = i;
-		temporary->next = NULL;
-		temporary->total_cells_to_send = 0;
-		temporary->cells_to_send = NULL;
-		temporary->voltages_to_send = NULL;
-	}
-	temporary = list_head;		//we reset the temp to the beginning of the sending list
-
-	while (c!=EOF) {
-		c = fpeek(input_file);
-		if (c==EOF)
-			break;
-
-		fscanf(input_file, "%d %d %lf\n", &send_cell, &rec_cell, &cond_value);
-		if (cond_value==0)		//this connection is considered not existing if conductance = 0, should not happen in sparse matrix format
-			;
-		else {
-
-		//part of the code handling RECEIVING and noting which of my cells needs input from which other cells, from ANY core
-
-			if ((rec_cell>=my_cell_lower_bound)&&(rec_cell<my_cell_upper_bound)) {
-				my_cell = rec_cell%cellCount;		//translation to local cell ids
-				if (my_neighbour_count[my_cell]==0) {	//initialization of the buffers for the first neighbour read
-					core_cells[my_cell].neighVdend = NULL;
-					core_cells[my_cell].neighConductances = NULL;
-					core_cells[my_cell].neighId = NULL;
-					core_cells[my_cell].neighSlots = NULL;
-				}
-				core_cells[my_cell].neighId = allocate_space_int(core_cells[my_cell].neighId, my_neighbour_count[my_cell]);
-				core_cells[my_cell].neighId[my_neighbour_count[my_cell]] = send_cell;                //which cell sends this voltage to us (GLOBAL ID)
-
-				core_cells[my_cell].neighSlots = allocate_space_int(core_cells[my_cell].neighSlots, my_neighbour_count[my_cell]);
-				core_cells[my_cell].neighSlots[my_neighbour_count[my_cell]] = -1;               //structure to accelerate unpacking process, read comm function
-
-				core_cells[my_cell].neighConductances = allocate_space_mod(core_cells[my_cell].neighConductances, my_neighbour_count[my_cell]);
-				core_cells[my_cell].neighConductances[my_neighbour_count[my_cell]] = cond_value;        //what conductance we use to calculate its impact
-
-				core_cells[my_cell].neighVdend = allocate_space_mod(core_cells[my_cell].neighVdend, my_neighbour_count[my_cell]); //allocate space for storing this voltage
-
-				my_neighbour_count[my_cell]++;		 //how many neighbours this cell has so far (from ANY core)
-				core_cells[my_cell].total_amount_of_neighbours = my_neighbour_count[my_cell];
-			}
-
-		//part of the code handling SENDING and bundling together my cells I need to send each core
-
-			if ((send_cell>=my_cell_lower_bound)&&(send_cell<my_cell_upper_bound)) {
-				my_cell = send_cell%cellCount;                  //which of our cells we send, translated locally
-				core_to_send = rec_cell/cellCount;		//which core we need to send this cell to
-				if (core_to_send==core_id)			//obviously I do not send to my own core
-					;
-				else {
-					temporary = list_head;				//reset the temp to the beginning of the sending list
-					while ((temporary!=NULL)&&(temporary->target_core!=core_to_send))	//search for the right list node
-						temporary = temporary->next;
-
-					if (temporary!=NULL) {
-						cells_marked_for_sending = temporary->total_cells_to_send;
-						last_cell_marked = -1;		//the last cell we have marked for sending to this core
-						if (cells_marked_for_sending>0)
-							last_cell_marked = temporary->cells_to_send[cells_marked_for_sending-1];
-
-						if ((cells_marked_for_sending==0)||(last_cell_marked!=my_cell)) {	//check whether we have already marked this cell for sending
-							temporary->cells_to_send = allocate_space_int(temporary->cells_to_send, temporary->total_cells_to_send);
-							temporary->cells_to_send[cells_marked_for_sending] = my_cell;
-
-							temporary->voltages_to_send = allocate_space_mod(temporary->voltages_to_send, temporary->total_cells_to_send);
-
-							temporary->total_cells_to_send++;;
-						}
-					}
-				}
-			}
-
-		//end of the code handling proper list and buffer creation concerning communication			
-
-		}
-	}
-
-	free(my_neighbour_count);
-	fclose(input_file);
-	temporary=NULL;
-
-	return list_head;
-}
-
-receiving_node* reckon_phase(sending_node *sending_list_head, cellCompParams *core_cells) {
-
-/* In this function, we will make the opposite of the sending_list: We will create a list detailing what
- * information we will receive from each other core. Since cell mapping and connections do not change,
- * we will create this list once in the beginning so that during simulation, only voltages are to be exchanged
- * This list will be created via some information exchange between cores (although it could be built during
- * the conductivity matrix parsing, this seems simpler)
- */
-	receiving_node *r_temporary = NULL, *receiving_list_head = NULL; 
-	sending_node *s_temporary = NULL;
-        int i, k, targetCore;
-	MPI_Request s_request;	//irrelevant
-	MPI_Request* request1 = (MPI_Request*) malloc(cores*sizeof(MPI_Request));
-	MPI_Request* request2 = (MPI_Request*) malloc(cores*sizeof(MPI_Request));
-
-	receiving_list_head = (receiving_node*) malloc(1*sizeof(receiving_node));
-	receiving_list_head->target_core = 0;
-	receiving_list_head->next = NULL;
-	receiving_list_head->total_cells_to_receive = 0;
-	receiving_list_head->cells_to_receive = NULL;
-	receiving_list_head->voltages_to_receive = NULL;
-	r_temporary = receiving_list_head;
-
-	for (i=1;i<cores;i++) {
-		r_temporary->next = (receiving_node*) malloc(1*sizeof(receiving_node));
-		r_temporary = r_temporary->next;
-		r_temporary->target_core = i;
-		r_temporary->next = NULL;
-		r_temporary->total_cells_to_receive = 0;
-		r_temporary->cells_to_receive = NULL;
-		r_temporary->voltages_to_receive = NULL;
-	}
-
-	s_temporary = sending_list_head;
-	r_temporary = receiving_list_head;
-
-	//phase 1: inform cores how many cells need to be exchanged
-
-	k = 0;
-	while ((r_temporary!=NULL)&&(s_temporary!=NULL)) {
-		targetCore = r_temporary->target_core;
-		if (targetCore == core_id)
-			request1[k] = MPI_REQUEST_NULL;
-		else {
-			MPI_Isend(&(s_temporary->total_cells_to_send), 1, MPI_INT, targetCore, 0, MPI_COMM_WORLD, &s_request);
-			MPI_Irecv(&(r_temporary->total_cells_to_receive), 1, MPI_INT, targetCore, 0, MPI_COMM_WORLD, &request1[k]);
-		}
-		r_temporary = r_temporary->next;
-		s_temporary = s_temporary->next;
-		k++;
-	}
-
-	syncing(request1);		//phase 1 complete, waiting for sync
-	free(request1);
-	// phase 2: allocate buffers to hold the incoming cells and exchange cell ids to know who sends what
-	// WARNING: the receiving buffer here gets filled with ids as the sending core sends them - they are NOT global ids
-	// and thus will NEED "translation"
-
-	s_temporary = sending_list_head;
-        r_temporary = receiving_list_head;
-
-	k = 0;
-	while ((r_temporary!=NULL)&&(s_temporary!=NULL)) {
-                targetCore = r_temporary->target_core;
-                if (targetCore == core_id)
-                        request2[k] = MPI_REQUEST_NULL;
-                else {
-
-			if (s_temporary->total_cells_to_send != 0)
-				MPI_Isend(&(s_temporary->cells_to_send[0]), s_temporary->total_cells_to_send, MPI_INT, targetCore, 0, MPI_COMM_WORLD, &s_request);
-
-			if (r_temporary->total_cells_to_receive != 0) {
-				r_temporary->cells_to_receive = (int*) malloc(r_temporary->total_cells_to_receive * sizeof(int));
-				r_temporary->voltages_to_receive = (mod_prec*) malloc(r_temporary->total_cells_to_receive * sizeof(mod_prec));
-				MPI_Irecv(&(r_temporary->cells_to_receive[0]), r_temporary->total_cells_to_receive, MPI_INT, targetCore, 0, MPI_COMM_WORLD, &request2[k]);
-			} else {
-				request2[k] = MPI_REQUEST_NULL;
-			}
-		}
-                r_temporary = r_temporary->next;
-                s_temporary = s_temporary->next;
-		k++;
-        }
-
-	syncing(request2);		//phase 2 complete, waiting for sync
-	free(request2);
-	return receiving_list_head;
-
-}
-
-void perform_communication_step(sending_node* sending_list_head, receiving_node* receiving_list_head, cellCompParams* params, cellState* cells, MPI_Request* s_request, MPI_Request* r_request) {
-
-/* The function where the magic happens: using the structures created during initialization, exchange necessary dendritic voltage
- * between all cores. This time, we use non-blocking functions and voltages are bundled together per core-target (and this time,
- * no duplicates when a core needs a voltage for more than one of its own cells).
- */
-
-	sending_node* s_temp;
-	receiving_node* r_temp;
-	int i, j, k=0;
-			
-	//phase 1: we send all of our necessary voltages
-	
-	s_temp = sending_list_head;
-	while (s_temp!=NULL) {
-		if (s_temp->total_cells_to_send==0)
-			s_request[k] = MPI_REQUEST_NULL;
-		else {
-			for (i=0; i<s_temp->total_cells_to_send; i++)			//fill the voltage buffer we shall send with the cells we need to send
-				s_temp->voltages_to_send[i] = cells[s_temp->cells_to_send[i]].dend.V_dend;
-			MPI_Isend(&(s_temp->voltages_to_send[0]), s_temp->total_cells_to_send, MPI_DOUBLE, s_temp->target_core, 0, MPI_COMM_WORLD, &s_request[k]);
-		}
-		k++;
-		s_temp = s_temp->next;
-	}
-	
-	//phase 2: we request all of the voltages we need and we sync the cores together
-	
-	r_temp = receiving_list_head;
-	k = 0;
-	while (r_temp!=NULL) {
-		if (r_temp->total_cells_to_receive==0)
-			r_request[k] = MPI_REQUEST_NULL;
-		else
-			MPI_Irecv(&(r_temp->voltages_to_receive[0]), r_temp->total_cells_to_receive, MPI_DOUBLE, r_temp->target_core, 0, MPI_COMM_WORLD, &r_request[k]);
-		k++;
-		r_temp = r_temp->next;
-	}
-
-	syncing(r_request);
-	cleanup_requests(s_request);
-	cleanup_requests(r_request);
-	return;
-
-}
-
-int* allocate_space_int(int* pointer, int existing_slots) {
-
-	int new_total_slots = existing_slots + 1;
-	int* new_pointer = (int*) realloc(pointer, new_total_slots*sizeof(int));
-	return new_pointer;
-}
-
-mod_prec* allocate_space_mod(mod_prec* pointer, int existing_slots) {
-
-	int new_total_slots = existing_slots + 1;
-        mod_prec* new_pointer = (mod_prec*) realloc(pointer, new_total_slots*sizeof(mod_prec));
-	return new_pointer;
-}
-
 void syncing(MPI_Request* request) {
 
 /* a function that first makes sure all requests passed on to it are completed
@@ -1457,23 +991,23 @@ void syncing(MPI_Request* request) {
  * one request from each core employed by the app
  */
 
-	int i, done = 0, flag, no_of_reqs = cores;
+        int i, done = 0, flag, no_of_reqs = cores;
 
-	while (!done) {
-		done = 1;
-		for (i=0;i<no_of_reqs;i++) {
-			if (request[i] == MPI_REQUEST_NULL)
-				;
-			else {
-				MPI_Test(&(request[i]), &flag, MPI_STATUS_IGNORE);
-				if (!flag)
-					done = 0;
-			}
-		}
-	}
+        while (!done) {
+                done = 1;
+                for (i=0;i<no_of_reqs;i++) {
+                        if (request[i] == MPI_REQUEST_NULL)
+                                ;
+                        else {
+                                MPI_Test(&(request[i]), &flag, MPI_STATUS_IGNORE);
+                                if (!flag)
+                                        done = 0;
+                        }
+                }
+        }
 
-	MPI_Barrier(MPI_COMM_WORLD);
-	return;
+        MPI_Barrier(MPI_COMM_WORLD);
+        return;
 
 }
 
@@ -1483,14 +1017,14 @@ void cleanup_requests(MPI_Request* request) {
  * are cleaned up properly
  */
 
-	int i, no_of_reqs = cores;
+        int i, no_of_reqs = cores;
 
-	for (i=0; i< no_of_reqs; i++) {
-		if (request[i] == MPI_REQUEST_NULL)
-			;
-		else
-			MPI_Request_free(&request[i]);
-	}
-	return;
+        for (i=0; i< no_of_reqs; i++) {
+                if (request[i] == MPI_REQUEST_NULL)
+                        ;
+                else
+                        MPI_Request_free(&request[i]);
+        }
+        return;
 
 }

@@ -38,6 +38,8 @@ holds sample scripts for compiling and using the OpenMP version
 of the code on an x86-based architecture and a Phi-KNC card.
 
 * scripts flagged as work in progress:
+	hybrid_phi_queue.sh
+	hybrid_xeon_queue.sh
 	microlab_omp.sh
 	sample_x86.sh
 	sample_phi.sh

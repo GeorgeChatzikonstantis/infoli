@@ -21,6 +21,15 @@ LINK_FLAGS= -O3 -lm
 # mic directives
 MIC= -mmic
 
+# define mic power measurement files
+MICPWRDIR=../lib/
+MICPWRH= ${MICPWRDIR}/power/mic_power.h
+MICPWRSO= mic_power
+IMFSO= imf
+INTLCSO= intlc
+IRNGSO= irng
+SVMLSO= svml
+
 # version directives
 OMP_FLAGS= -openmp
 HYBRID_FLAGS= -mt_mpi -openmp
@@ -45,8 +54,9 @@ omp_xeon: ${OMP_DIR}${SRC} ${OMP_DIR}${HDR}
 omp_phi: ${OMP_DIR}${SRC} ${OMP_DIR}${HDR}
 	@echo #
 	@echo "Building For Pure OpenMP Version on Phi"
-	icc ${OMP_DIR}${SRC} -o ${OMP_DIR}${OBJ} ${MIC} ${OMP_FLAGS} ${COMP_FLAGS}
-	icc ${OMP_DIR}${OBJ} -o ${BIN_DIR}${EXE} ${MIC} ${OMP_FLAGS} ${LINK_FLAGS}
+	icc ${OMP_DIR}${SRC} -o ${OMP_DIR}${OBJ} ${MIC} ${OMP_FLAGS} ${COMP_FLAGS} -I${MICPWRDIR}
+	icc ${OMP_DIR}${OBJ} -o ${OMP_DIR}${EXE} ${MIC} ${OMP_FLAGS} ${LINK_FLAGS} -L${MICPWRDIR} \
+	-l${MICPWRSO} -l${IMFSO} -l${INTLCSO} -l${IRNGSO} -l${SVMLSO}
 
 hybrid_xeon: ${HYBRID_DIR}${SRC} ${HYBRID_DIR}${HDR}
 	@echo #
