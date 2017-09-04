@@ -61,9 +61,8 @@ do
 		export MYJOB="$bindir/infoli.x $size $pct 10"
 		export OMP_NUM_THREADS=$(bc -l <<< "scale=0; 200/$ranks_per_node")
 
-#		micnativeloadex $rootdir/run/input/infoli.x -a "1000 0.1 10"\
-#		-e "export OMP_NUM_THREADS=200"
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -envall -n $ranks -host $MICNAME $MYJOB
+		micnativeloadex $bindir/infoli.x -a "1000 0.1 10" -e "export OMP_NUM_THREADS=200"
+#		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -envall -n $ranks -host $MICNAME $MYJOB
 
 	done
 done
