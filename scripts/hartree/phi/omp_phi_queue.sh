@@ -47,20 +47,20 @@ mv OpenMP/infoli.x ~/InfOliFull/run/input
 
 # prep input: copy runtime lib to input
 cd ~/InfOliFull/run/
-cp runtime_libs/hartree/libiomp5.so input
+#cp runtime_libs/hartree/libiomp5.so input
 
 # preparations complete, conduct the experiment
 cd ~/InfOliFull/run/input
 for size in 1000
 do
 
-	for synapses in 0 250
+	for synapses in 0
 	do
 
 		density=$(bc -l <<< "scale=6; $synapses/$size")
 		export MYJOB="$rootdir/run/input/infoli.x $size $density 100"
 
-		for times in 1 2
+		for times in 1
 		do
 			for threads in 200
 			do

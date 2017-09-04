@@ -7,8 +7,8 @@
 #BSUB -q phiq
 
 # number of ranks used
-ranks=2
-ranks_per_node=2
+ranks=1
+ranks_per_node=1
 
 # prepare Hartree's modules
 source /etc/profile.d/modules.sh
@@ -21,6 +21,7 @@ export OFFLOAD_INIT=on_start
 export I_MPI_PIN_DOMAIN=omp
 export KMP_AFFINITY=balanced
 export KMP_PLACE_THREADS=60c,4t
+export I_MPI_MIC=enable
 export LD_LIBRARY_PATH=/gpfs/stfc/local/apps/intel/intel_cs/2015.1.133/composer_xe_2015.1.133/compiler/lib/mic:\
 /gpfs/stfc/local/apps/intel/intel_cs/2015.1.133/composer_xe_2015.1.133/compiler/lib/intel64:\
 /gpfs/stfc/local/apps/intel/intel_mpi/5.0.2.044/intel64/lib:\
@@ -62,21 +63,22 @@ export analysis_type="general-exploration"
 
 # preparations complete, conduct the experiment
 cd $rootdir/run/input
-for size in 10000
+for size in 1000
 do
 
 	for pct in 0.1
 	do
 
-		export MYJOB="$rootdir/run/input/infoli.x $size $pct 100"
+#		export MYJOB="pwd; ls; $rootdir/run/input/infoli.x $size $pct 10"
+		export MYJOB="pwd"
 		export OMP_NUM_THREADS=$(bc -l <<< "scale=0; 200/$ranks_per_node")
 		export vtuneCommand="amplxe-cl -c $analysis_type -result-dir vtune_report1_$size \
 		-target-system=mic-host-launch:0 \
 		--target-install-dir=/gpfs/stfc/local/apps/intel/intel_cs/vtune_amplifier_xe_2015 --"
 #		$vtuneCommand mpirun -np 1 -genvall -host $MICNAME ${MYJOB}
-#		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np $ranks -genvall -host $MICNAME ${MYJOB}
-		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" micnativeloadex $rootdir/run/input/infoli.x -a "1000 0.1 10"\
-		-e "export OMP_NUM_THREADS=200"
+		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -envall -n $ranks -host $MICNAME pwd
+#		/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" micnativeloadex $rootdir/run/input/infoli.x -a "1000 0.1 10"\
+#		-e "export OMP_NUM_THREADS=200"
 
 	done
 done

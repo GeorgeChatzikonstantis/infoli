@@ -3,11 +3,11 @@
 #BSUB -e /gpfs/stfc/local/HCEEC005/nnm17/gxc30-nnm17/InfOliFull/run/output/georgecjob.err
 #BSUB -R "span[ptile=2]"
 #BSUB -W 24:00
-#BSUB -n 2
+#BSUB -n 10
 #BSUB -q phiq
 
 # number of ranks used
-ranks=2
+ranks=10
 
 # prepare Hartree's modules
 source /etc/profile.d/modules.sh

@@ -130,6 +130,10 @@ int main(int argc, char *argv[]){
 	 * in the case of inputFromFile, we will also need a buffer to hold the stimulus
 	 * for each cell on each step
   	 */
+
+	char host_name[100];
+	gethostname(host_name, 100);
+	printf("Rank %d: Running on %s.\n", core_id, host_name);
 	
 	if(argc == 4) {
 		inputFromFile = 0;
@@ -667,6 +671,9 @@ int main(int argc, char *argv[]){
 		pOutFile) private(target_cell, i, requested_neighbour, targetCore, f, V, coded_package_index, decoded_package_index, \
 		voltage, I_c_storage) firstprivate(simulation_array_ID)
 			for (target_cell=0;target_cell<cellCount;target_cell++) {
+
+				if ((simStep==0)&&(target_cell==0))
+					printf("Rank %d: Executing with %d threads.\n", core_id, omp_get_num_threads());
 
 				//Feeding of Input Current
 				iAppIn[target_cell] = iApp;
