@@ -10,6 +10,14 @@ echo "If no argument is given it runs on default values!"
 # Get the Directories
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 CUR_DIR=$(pwd)
+HOME="$(getent passwd $USER | awk -F ':' '{print $6}')"
+
+if [ "$CUR_DIR" == "$HOME" ]
+then
+    mkdir -p "$CUR_DIR/brainframe-reses"
+    $CUR_DIR="$CUR_DIR/brainframe-reses"
+fi
+
 DATE=`date +%T`
 NAME="phiH"_$DATE
 
@@ -80,7 +88,5 @@ export LSF_ENVDIR=/opt/lsf/conf
 export LSF_SERVERDIR=/opt/lsf/9.1/linux2.6-glibc2.3-x86_64/etc
 
 eval $CMD
-
-#Ta parakato tha ginontai pio prin
 
 
