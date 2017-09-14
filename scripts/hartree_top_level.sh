@@ -15,7 +15,7 @@ HOME="$(getent passwd $USER | awk -F ':' '{print $6}')"
 if [ "$CUR_DIR" == "$HOME" ]
 then
     mkdir -p "$CUR_DIR/brainframe-reses"
-    $CUR_DIR="$CUR_DIR/brainframe-reses"
+    CUR_DIR="$CUR_DIR/brainframe-reses"
 fi
 
 DATE=`date +%T`
