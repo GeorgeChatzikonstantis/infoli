@@ -10,6 +10,9 @@ if [ $hostname == "phaethon.microlab.ntua.gr" ];
 then
 	cd $root_dir/src
 	make omp_phi
+	cd -
+	scp $root_dir/bin/infoli.x mic0:~
+	scp $root_dir/lib/lib* mic0:~
 else if [[ $hostname == "crb"* ]];
 	then
 		source /etc/profile.d/modules.sh
