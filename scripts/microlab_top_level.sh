@@ -19,11 +19,11 @@ then
 fi
 
 DATE=`date +%T`
-NAME="phiH"_$DATE
+DNAME="phiH"_$DATE
 
 echo $SCRIPT_DIR
 echo $CUR_DIR
-echo $NAME
+echo $DNAME
 
 # Thread options
 MICNAME="mic0"
@@ -41,7 +41,7 @@ do
 
     case $key in
         -dir|-working_dir)
-            NAME="$2"
+            DNAME="$2"
             shift # past argument
             ;;
         -ns|-net_size)
@@ -69,25 +69,24 @@ do
     shift # past argument or value
 done
 
-echo "SIZE= ${SIZE}|Density= ${PROB}|Simtime= ${STIME}|Threads=$THREADSNUM"
-mkdir -p $CUR_DIR/$NAME
+echo "SIZE= ${SIZE}|Density= ${PROB}|Simtime= ${STIME}|Threads=$THREADSNUM DNameP:$DNAME"
+mkdir -p $CUR_DIR/$DNAME
 
 MYJOB="../infoli.x ${SIZE} ${PROB} ${STIME}"
 
-ssh $MICNAME "mkdir -p $NAME"
+ssh $MICNAME "mkdir -p $DNAME"
 
 
-ssh ${MICNAME} "\
-    export LD_LIBRARY_PATH=~:$LD_LIBRARY_PATH; \
-    export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t; \
-    export OMP_NUM_THREADS=$THREADSNUM; cd ~/$ΝΑΜΕ; $MYJOB;\ 
-    scp InferiorOlive_Output.txt harry@phaethon.microlab.ntua.gr:$CUR_DIR/$NAME"
+ssh ${MICNAME} "export LD_LIBRARY_PATH=~:$LD_LIBRARY_PATH; \
+    export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t;\
+    export OMP_NUM_THREADS=$THREADSNUM;cd ${DNAME};${MYJOB}; \
+    scp InferiorOlive_Output.txt harry@phaethon.microlab.ntua.gr:$CUR_DIR/${DNAME}"
 
 
-echo "Simulation Finished, results in \"$CUR_DIR/$NAME/" folder.\n"
+echo "Simulation Finished, results in \"$CUR_DIR/$DNAME/\" folder.\n"
 echo "-----------------------------------\n"
 # the experiment is complete, clean up input and mic-trash and move results to output
 echo "Cleaning shared memory."
-ssh $MICNAME "rm -rf ~/$NAME"
+ssh $MICNAME "rm -rf ~/$DNAME"
 echo "Everything ok!"
 
