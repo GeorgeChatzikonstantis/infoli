@@ -80,7 +80,7 @@ ssh $MICNAME "mkdir -p $DNAME"
 ssh ${MICNAME} "export LD_LIBRARY_PATH=~:$LD_LIBRARY_PATH; \
     export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t;\
     export OMP_NUM_THREADS=$THREADSNUM;cd ${DNAME};${MYJOB}; \
-    scp InferiorOlive_Output.txt harry@phaethon.microlab.ntua.gr:$CUR_DIR/${DNAME}"
+    scp InferiorOlive_Output.txt $USER@phaethon.microlab.ntua.gr:$CUR_DIR/${DNAME}"
 
 
 echo "Simulation Finished, results in \"$CUR_DIR/$DNAME/\" folder.\n"
