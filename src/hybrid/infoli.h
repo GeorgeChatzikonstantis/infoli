@@ -28,7 +28,6 @@
 //IO network size is IO_NETWORK_DIM1*IO_NETWORK_DIM2
 #define IAPP_MAX_CHARS 6 //	2 integer, the dot, 2 decimals and the delimiter 
 #define PRINTING 1	 //	flag enabling or disabling output , axon's voltage is the output at every step
-#define G_CAL_FROM_FILE 0		//	flag enabling or disabling user defined initial settings of gcal
 
 
 // Cell properties , biological properties for the cells ( irrevelant for now )

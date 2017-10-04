@@ -73,7 +73,7 @@ int main(int argc, char *argv[]){
 	 * necessary for program flow
 	 */
 
-	int i=0, j, k=0, line_count, targetCore;
+	int i=0, j, k=0, line_count, targetCore, print_granularity=1;
 	char c;
 	char *inFileName;
 	char outFileName[100];
@@ -166,6 +166,10 @@ int main(int argc, char *argv[]){
 			printf("Error: Couldn't create %s\n", outFileName);
 			exit(EXIT_FAILURE);
 		}
+		print_granularity=100;
+		#ifdef G_CAL_FROM_FILE
+			print_granularity=1;
+		#endif
 	}
 
 	/* Channel declaration and mem allocation 
@@ -230,8 +234,9 @@ int main(int argc, char *argv[]){
 		Potassium_x_a[i] = 0.2369847;// Potassium (transient)
 	}
 
-	if (G_CAL_FROM_FILE)
+	#ifdef G_CAL_FROM_FILE
 		read_g_CaL_from_file(g_CaL);
+	#endif
 
 	/* cellCompParams contains
 	 * connection information for the NW
@@ -315,19 +320,21 @@ int main(int argc, char *argv[]){
 
 
 	//Initialize output file IF enabled
-	if (PRINTING) {
-		sprintf(tempbuf, "Execution Time for Simulation in ms:              \n");
-		fputs(tempbuf, pOutFile);
-		sprintf(tempbuf, "#simSteps Input(Iapp) Output(V_axon)");
-                fputs(tempbuf, pOutFile);
-		for (i=0;i<cellCount;i++) {
-			sprintf(tempbuf, "%d ", cellID[i]);
+	#ifndef G_CAL_FROM_FILE
+		if (PRINTING) {
+			sprintf(tempbuf, "Execution Time for Simulation in ms:              \n");
+				fputs(tempbuf, pOutFile);
+			sprintf(tempbuf, "#simSteps Input(Iapp) Output(V_axon)");
+				fputs(tempbuf, pOutFile);
+			for (i=0;i<cellCount;i++) {
+				sprintf(tempbuf, "%d ", cellID[i]);
+					fputs(tempbuf, pOutFile);
+			}
+			sprintf(tempbuf, "\n");
 			fputs(tempbuf, pOutFile);
 		}
-		sprintf(tempbuf, "\n");
-		fputs(tempbuf, pOutFile);
-	}
-	
+	#endif
+
 	//Initialize g_CaL
 	seedvar = time(NULL);		//seedvar will be time- and core-dependent now!
 	srand(seedvar);
@@ -416,11 +423,12 @@ int main(int argc, char *argv[]){
 				iApp = 6; 
 			else
 		   		iApp = 0;
-			
-			if (PRINTING) {
-				sprintf(tempbuf, " %d %.2f ", simStep+1, iApp);
-				fputs(tempbuf, pOutFile);
-			}
+			#ifndef G_CAL_FROM_FILE
+				if (PRINTING) {
+					sprintf(tempbuf, " %d %.2f ", simStep+1, iApp);
+					fputs(tempbuf, pOutFile);
+				}
+			#endif
 
 	/*	First Loop takes care of Gap Junction Functions
  	*/			
@@ -611,11 +619,15 @@ int main(int argc, char *argv[]){
 			}
 
 
-			if (PRINTING&&((simStep%100)==0)) {
+			if (PRINTING&&((simStep%print_granularity)==0)) {
 
 			#pragma omp parallel for simd shared (V_axon, pOutFile) private(target_cell, tempbuf)
 				for (target_cell=0;target_cell<cellCount;target_cell++) {
-					sprintf(tempbuf, "%d : %.8f ", target_cell+1, V_axon[target_cell]);
+					#ifndef G_CAL_FROM_FILE
+						sprintf(tempbuf, "%d : %.8f ", target_cell+1, V_axon[target_cell]);
+					#else
+						sprintf(tempbuf, "%.8f ", V_axon[target_cell]);
+					#endif
 					fputs(tempbuf, pOutFile);
 				}
 
@@ -653,7 +665,9 @@ int main(int argc, char *argv[]){
 		sprintf(tempbuf, "Execution Time for Simulation in ms: %0.2f\n", \
 			((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
 			(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
-                fputs(tempbuf, pOutFile);
+		#ifndef G_CAL_FROM_FILE
+			fputs(tempbuf, pOutFile);
+		#endif
 		fclose (pOutFile);
 	}
 
