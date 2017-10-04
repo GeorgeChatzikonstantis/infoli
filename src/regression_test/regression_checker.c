@@ -44,10 +44,13 @@ int main(int argc, char *argv[]){
 		}
 		line++;
 	}
-	printf("Maximum error was found %0.4f%%.\n", max_error);
-	if (max_error>0) {
+	
+	if (max_error>0.01) {
+		printf("\nWarning! Maximum error found: %0.4f%%.\n", max_error*100);
 		printf("Maximum discrepancy was found at line %d, neuron %d:\n", stored_line, stored_index);
 		printf("Correct value: %0.8f - Runtime value: %0.8f.", stored_v1, stored_v2);
+	} else {
+		printf("\nCheck was passed successfully!\n");
 	}
 
 	fclose(pFileBase);
