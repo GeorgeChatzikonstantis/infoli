@@ -1,16 +1,12 @@
 #!/bin/bash
-
-echo "Runs a job with the infoli simulator from current Directory."
-echo "It creates a new folder or a given folder outputs the results there"
-echo "Usage: ./microlab_top_level.sh -dir <dir to put results (doesn't need
-to exists)> -ns <network size> -pb <network density> -st <simulation time> -th <threads num>\n"
-echo "If no argument is given it runs on default values!"
-
 # Get the Directories
+
+ALL_THREADS=220
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 CUR_DIR=$(pwd)
 BASE_DIR=$(dirname $SCRIPT_DIR)
 HOME="$(getent passwd $USER | awk -F ':' '{print $6}')"
+THREAD_FILE="$HOME/brainframe-reses/phaethon.state"
 
 if [ "$CUR_DIR" == "$HOME" ]
 then
@@ -64,6 +60,12 @@ do
         *)
             # unknown option
             echo "Invalid argument: $1"
+            echo "Runs a job with the infoli simulator from current Directory."
+            echo "It creates a new folder or a given folder outputs the results there"
+            echo "Usage: ./microlab_top_level.sh -dir <dir to put results (doesn't need
+            to exists)> -ns <network size> -pb <network density> -st <simulation time> -th <threads num>\n"
+            echo "If no argument is given it runs on default values!"
+
             exit 1
     esac
     shift # past argument or value
@@ -73,6 +75,15 @@ echo "SIZE= ${SIZE}|Density= ${PROB}|Simtime= ${STIME}|Threads=$THREADSNUM DName
 mkdir -p $CUR_DIR/$DNAME
 
 MYJOB="../infoli.x ${SIZE} ${PROB} ${STIME}"
+
+
+read CUR_THREADS ALL_THREADS < $THREAD_FILE
+echo $CUR_THREADS
+echo $ALL_THREADS
+
+((USED_THREADS = $CUR_THREADS + $THREADSNUM))
+
+echo "$USED_THREADS $ALL_THREADS">$THREAD_FILE 
 
 ssh $MICNAME "mkdir -p $DNAME"
 
@@ -85,6 +96,15 @@ ssh ${MICNAME} "export LD_LIBRARY_PATH=~:$LD_LIBRARY_PATH; \
 
 echo "Simulation Finished, results in \"$CUR_DIR/$DNAME/\" folder.\n"
 echo "-----------------------------------\n"
+
+read CUR_THREADS ALL_THREADS < $THREAD_FILE
+echo $CUR_THREADS
+echo $ALL_THREADS
+
+((USED_THREADS = $CUR_THREADS - $THREADSNUM))
+
+echo "$USED_THREADS $ALL_THREADS">$THREAD_FILE 
+ 
 # the experiment is complete, clean up input and mic-trash and move results to output
 echo "Cleaning shared memory."
 ssh $MICNAME "rm -rf ~/$DNAME"
