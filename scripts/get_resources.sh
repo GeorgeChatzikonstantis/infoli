@@ -9,11 +9,6 @@ USED=`ssh $MICNAME "ps axHr| wc -l"`
 
 
 
-echo $ALL $USED>$THREAD_FILE
-echo $ALL $USED
+echo $USED $ALL>$THREAD_FILE
+echo $USED $ALL
 
-read VAR1 VAR2 < $THREAD_FILE
-
-((VAR1=$VAR1 + $VAR2))
-echo $VAR1
-echo $VAR2
