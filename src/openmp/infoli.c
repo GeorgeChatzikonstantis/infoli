@@ -29,20 +29,17 @@
 #define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <ctype.h>
 #include <string.h>
 #include <math.h>
 #include <sys/time.h>
 #include <time.h>
-#include "infoli.h"
 #include <omp.h>
+#include "infoli.h"
 //#include <mic_power.h>
 
-int core_id, cores, cellCount;
-int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
-float CONN_PROBABILITY;
-struct timeval tic, toc;
-
-int main(int argc, char *argv[]){
+int main(int argc, char **argv){
 	
 	/* declaration of variables
 	 * necessary for program flow
@@ -51,12 +48,13 @@ int main(int argc, char *argv[]){
 	int i=0, j, k=0, line_count, targetCore, print_granularity=1;
 	char c;
 	char *inFileName;
-	char outFileName[100];
+	char *outFileName;
+	char *paramsFileName;
 	FILE *pInFile, *coreF;
 	char conFile[200],core_file[100];
 	FILE *pConFile,*pOutFile;
 	mod_prec* iAppArray= NULL;
-	int simStep = 0, inputFromFile = 0, initSteps,total_simulation_steps;
+	int simStep = 0, inputFromFile, initSteps,total_simulation_steps;
 	float simTime = 0;
 	int seedvar;
 	char tempbuf[100];		
@@ -65,6 +63,7 @@ int main(int argc, char *argv[]){
 	int *init_steps;
 	long double seconds;
 	int simulation_array_ID,target_cell, requested_neighbour;
+	mod_prec* initValues= NULL;
 
 	cellCompParams cellParamsPtr;
 
@@ -93,18 +92,49 @@ int main(int argc, char *argv[]){
 	 */ 
 
 	/* Process command line arguments
-	 * Case argc = 3 then a one-pulse input is stimulated.
-	 * Otherwise we receive input from a specified file in argv[3] and simulation runs accordingly
+	 * If we have no input from file then a one-pulse input is stimulated.
+	 * Otherwise we receive input from a specified file and simulation runs accordingly
 	 * in the case of inputFromFile, we will also need a buffer to hold the stimulus
 	 * for each cell on each step
   	 */
-	
-	if(argc == 4) {
-		inputFromFile = 0;
+
+	/* We first set some default values
+ 	*/ 	
+
+	IO_NETWORK_SIZE = 1000;
+	CONN_PROBABILITY = 0.5;
+	simTime = 5000;
+	inFileName = (char*) malloc(200*sizeof(char));
+	inputFromFile = 0;
+	paramsFileName = (char*) malloc(200*sizeof(char));
+	sprintf(paramsFileName,"default.conf");
+	outFileName = (char*) malloc(200*sizeof(char));
+	sprintf(outFileName,"InferiorOlive_Output.txt");
+
+	/* Argument parsing
+	 */ 
+
+	int option = 0;
+	while ((option = getopt(argc, argv,"n:p:t:i:c:o:")) != -1) {
+		switch (option) {
+			case 'n' : IO_NETWORK_SIZE = atoi(optarg);
+				break;
+			case 'p' : CONN_PROBABILITY = atof(optarg);
+				break;
+			case 't' : simTime = atof(optarg);
+				break;
+			case 'i' : inputFromFile = 1; inFileName = optarg;
+				break;
+			case 'c' : paramsFileName = optarg;
+				break;
+			case 'o' : outFileName = optarg;
+				break;
+			default: print_usage();
+				exit(EXIT_FAILURE);
+		}
 	}
-	else if(argc == 5) {
-		inputFromFile = 1;
-		inFileName = argv[2];
+	
+	if (inputFromFile) {
 		pInFile = fopen(inFileName,"r");
 		if(pInFile==NULL) {
 			printf("Error: Couldn't open %s\n", inFileName);
@@ -112,18 +142,6 @@ int main(int argc, char *argv[]){
 		}
 		iAppArray= (mod_prec*) _mm_malloc(cellCount*(sizeof(mod_prec)), 64);
 	}	
-	else {
-		printf("Error: Too many arguments.\nUsage: ./InferiorOlive <#nrns> <density ([0,1])> <simtime>\nor ./InferiorOlive <#nrns> <density ([0,1])> <simtime> <stimulus_file>\n");
-		exit(EXIT_FAILURE);
-	}
-
-	/* outFileName is file for output
-	 */
-        sprintf(outFileName,"InferiorOlive_Output.txt");
-        
-        IO_NETWORK_SIZE = atoi(argv[1]);
-        CONN_PROBABILITY = atof(argv[2]);
-        simTime = atof(argv[3]);
 
         /* compute how many grid cells 
 	 * are assigned to each core
@@ -179,39 +197,74 @@ int main(int argc, char *argv[]){
 		exit(EXIT_FAILURE);
 	}
 
-	/* Initialise network with appropriate values.
+	/* Initialise simulation with appropriate values.
 	*/
+	initValues= (mod_prec*) malloc(42*sizeof(mod_prec));
+	read_parameters(paramsFileName, initValues);
+
+	/* Generic Simulation Values
+	 */ 
+
+	DELTA = initValues[0];
+	CONDUCTANCE = initValues[1];
+	C_M = initValues[2];
+	G_NA_S = initValues[3];
+	G_KDR_S = initValues[4];
+	G_K_S = initValues[5];
+	G_LS = initValues[6];
+	G_K_CA = initValues[7];
+	G_CAH = initValues[8];
+	G_LD = initValues[9];
+	G_H = initValues[10];
+	G_NA_A = initValues[11];
+	G_NA_R = initValues[12];
+	G_K_A = initValues[13];
+	G_LA = initValues[14];
+	P1 = initValues[15];
+	P2 = initValues[16];
+	G_INT = initValues[17];
+	V_NA = initValues[18];
+	V_K = initValues[19];
+	V_CA = initValues[20];
+	V_H = initValues[21];
+	V_L = initValues[22];
+
+	/*  Network Specific Values
+	 */
 
 	for (i=0;i<cellCount;i++) {
 		cellID[i] = i;
 		//Initial dendritic parameters
-		V_dend[i] = -60;
-		Calcium_r[i] = 0.0112788;// High-threshold calcium
-		Potassium_s[i] = 0.0049291;// Calcium-dependent potassium
-		Hcurrent_q[i] = 0.0337836;// H current
-		Ca2Plus[i] = 3.7152;// Calcium concentration
-		I_CaH[i] = 0.5;// High-threshold calcium current
+		V_dend[i] = initValues[23];
+		Calcium_r[i] = initValues[24];// High-threshold calcium
+		Potassium_s[i] = initValues[25];// Calcium-dependent potassium
+		Hcurrent_q[i] = initValues[26];// H current
+		Ca2Plus[i] = initValues[27];// Calcium concentration
+		I_CaH[i] = initValues[28];// High-threshold calcium current
 		//Initial somatic parameters
-		g_CaL[i] = 0.68; //default arbitrary value but it should be randomized per cell
-		V_soma[i] = -60;
-		Sodium_m[i] = 1.0127807;// Sodium (artificial)
-		Sodium_h[i] = 0.3596066;
-		Potassium_n[i] = 0.2369847;// Potassium (delayed rectifier)
-		Potassium_p[i] = 0.2369847;
-		Potassium_x_s[i] = 0.1;// Potassium (voltage-dependent)
-		Calcium_k[i] = 0.7423159;// Low-threshold calcium
-		Calcium_l[i] = 0.0321349;
+		g_CaL[i] = initValues[29]; //default arbitrary value but it should be randomized per cell
+		V_soma[i] = initValues[30];
+		Sodium_m[i] = initValues[31];// Sodium (artificial)
+		Sodium_h[i] = initValues[32];
+		Potassium_n[i] = initValues[33];// Potassium (delayed rectifier)
+		Potassium_p[i] = initValues[34];
+		Potassium_x_s[i] = initValues[35];// Potassium (voltage-dependent)
+		Calcium_k[i] = initValues[36];// Low-threshold calcium
+		Calcium_l[i] = initValues[37];
 		// Initial axonal parameters
-		V_axon[i] = -60;
+		V_axon[i] = initValues[38];
 		//sisaza: Sodium_m_a doesn't have a state, therefore this assignment doesn'thave any effect
-		Sodium_m_a[i] = 0.003596066;// Sodium (thalamocortical)
-		Sodium_h_a[i] = 0.9;
-		Potassium_x_a[i] = 0.2369847;// Potassium (transient)
+		Sodium_m_a[i] = initValues[39];// Sodium (thalamocortical)
+		Sodium_h_a[i] = initValues[40];
+		Potassium_x_a[i] = initValues[41];// Potassium (transient)
 	}
 
 	#ifdef G_CAL_FROM_FILE
 		read_g_CaL_from_file(g_CaL);
 	#endif
+
+	/*Value Initialization Complete
+	 */ 
 
 	/* cellCompParams contains
 	 * connection information for the NW

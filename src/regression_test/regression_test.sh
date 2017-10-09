@@ -69,10 +69,10 @@ else
 fi
 
 if [ "$BUILD" == 'omp' ]; then
-	./infoli.x $neurons $density $simtime 
+	./infoli.x -n $neurons -p $density -t $simtime 
 else
 	if [ "$BUILD" == 'hybrid' ]; then
-		mpirun -np 1 ./infoli.x $neurons $density $simtime
+		mpirun -np 1 ./infoli.x -n $neurons -p $density -t $simtime
 		mv InferiorOlive_Output0.txt InferiorOlive_Output.txt
 	fi
 fi

@@ -18,8 +18,8 @@ UTILS_O= utils.o
 UTILS_PHI_O= utils_phi.o
 
 # common directives
-COMP_FLAGS= -w -c -O3 -vec-report6 -opt-subscript-in-range -opt-report-phase ipo_inl -lm
-UTILS_FLAGS= -w -c -O3 -lm
+COMP_FLAGS= -c -O3 -vec-report6 -opt-subscript-in-range -opt-report-phase ipo_inl -lm
+UTILS_FLAGS= -c -O3 -lm
 LINK_FLAGS= -O3 -lm
 
 # regression check directive

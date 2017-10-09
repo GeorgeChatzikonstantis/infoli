@@ -8,12 +8,13 @@
 
 int main(int argc, char *argv[]){
 
-	FILE *pFileBase, *pFileTest;
+	FILE *pFileBase=NULL, *pFileTest=NULL;
 	char fileBaseName[100];
 	char fileTestName[100];
 	float error, relative_error, max_error=0.0;
 	float stored_v1, stored_v2;
 	int index, line, stored_line, stored_index;
+	int empty_results=1;
 
 	if (argc!=2) {
 		printf("Checker Error: Incorrect arguments.\nUsage: ./checker <nw_size>\n");
@@ -27,7 +28,15 @@ int main(int argc, char *argv[]){
 	sprintf(fileTestName,"InferiorOlive_Output.txt");
 
 	pFileBase = fopen(fileBaseName,"r");
+	if (pFileBase==NULL) {
+		printf("\nCould not locate baseline results file for regression test.\n");
+		exit(EXIT_FAILURE);
+	}
 	pFileTest = fopen(fileTestName,"r");
+	if (pFileTest==NULL) {
+		printf("\nCould not locate build test results.\nCheck whether the new build compiles and runs properly.\n");
+		exit(EXIT_FAILURE);
+	}
 
 	line=1;
 	while ((ReadFileLine(pFileBase, &matrixBase[0], nw_size))&&(ReadFileLine(pFileTest, &matrixTest[0], nw_size))) {
@@ -43,9 +52,12 @@ int main(int argc, char *argv[]){
 			}
 		}
 		line++;
+		empty_results=0;
 	}
 	
-	if (max_error>0.01) {
+	if (empty_results) {
+		printf("Build test results file empty.\nCheck whether the new build compiles and runs properly.\n");
+	} else if (max_error>0.01) {
 		printf("\nWarning! Maximum error found: %0.4f%%.\n", max_error*100);
 		printf("Maximum discrepancy was found at line %d, neuron %d:\n", stored_line, stored_index);
 		printf("Correct value: %0.8f - Runtime value: %0.8f.", stored_v1, stored_v2);
