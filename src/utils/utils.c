@@ -38,16 +38,18 @@ char fpeek(FILE *stream)
 
 void removeSubstring(char *s, const char *toremove) {
 
-	s=strstr(s,toremove);
+	s = strstr(s,toremove);
 	memmove(s,s+strlen(toremove),1+strlen(s+strlen(toremove)));
 
 }
 
 void stopAtSubstring(char *s, const char *toremove) {
 
-	char* temp=strstr(s,toremove);
-	if (temp!=NULL)
-		temp[0]='\0';
+	char* temp = strstr(s,toremove);
+	if (temp!=NULL) {
+		temp[0] = '\0';
+		temp = NULL;
+	}
 
 }
 
