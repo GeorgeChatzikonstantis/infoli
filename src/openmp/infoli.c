@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <limits.h>
 #include <string.h>
 #include <math.h>
 #include <sys/time.h>
@@ -50,6 +51,7 @@ int main(int argc, char **argv){
 	char *inFileName;
 	char *outFileName;
 	char *paramsFileName;
+	char *exeLink;
 	FILE *pInFile, *coreF;
 	char conFile[200],core_file[100];
 	FILE *pConFile,*pOutFile;
@@ -104,11 +106,21 @@ int main(int argc, char **argv){
 	IO_NETWORK_SIZE = 1000;
 	CONN_PROBABILITY = 0.5;
 	simTime = 5000;
-	inFileName = (char*) malloc(200*sizeof(char));
+
+	inFileName = (char*) malloc(PATH_MAX*sizeof(char));
 	inputFromFile = 0;
-	paramsFileName = (char*) malloc(200*sizeof(char));
-	sprintf(paramsFileName,"default.conf");
-	outFileName = (char*) malloc(200*sizeof(char));
+
+	paramsFileName = (char*) malloc(PATH_MAX*sizeof(char));
+	exeLink = (char*) malloc(PATH_MAX*sizeof(char));
+	sprintf(exeLink, "/proc/self/exe");
+	if (readlink(exeLink, paramsFileName, PATH_MAX) == -1) {
+		printf("Error: Couldn't read simlink to running executable.\n");
+		exit(EXIT_FAILURE);
+	}
+	stopAtSubstring(paramsFileName, "infoli.x");
+	strcat(paramsFileName, "default.conf");
+
+	outFileName = (char*) malloc(PATH_MAX*sizeof(char));
 	sprintf(outFileName,"InferiorOlive_Output.txt");
 
 	/* Argument parsing
@@ -452,7 +464,7 @@ int main(int argc, char **argv){
 			else
 		   		iApp = 0;
 			#ifndef G_CAL_FROM_FILE
-				if (PRINTING) {
+				if (PRINTING&&((simStep%print_granularity)==0)) {
 					sprintf(tempbuf, " %d %.2f ", simStep+1, iApp);
 					fputs(tempbuf, pOutFile);
 				}

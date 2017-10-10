@@ -36,6 +36,21 @@ char fpeek(FILE *stream)
 	return c;
 }
 
+void removeSubstring(char *s, const char *toremove) {
+
+	s=strstr(s,toremove);
+	memmove(s,s+strlen(toremove),1+strlen(s+strlen(toremove)));
+
+}
+
+void stopAtSubstring(char *s, const char *toremove) {
+
+	char* temp=strstr(s,toremove);
+	if (temp!=NULL)
+		temp[0]='\0';
+
+}
+
 int ReadFileLine(FILE *pInFile, mod_prec *iAppArray){
 
 	char c= fpeek(pInFile);
