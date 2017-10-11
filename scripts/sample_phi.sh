@@ -23,7 +23,6 @@ rm -rf input/*
 # prep input: compiling executable
 cd ../src
 make omp_phi
-mv OpenMP/infoli.x ../run/input
 
 # prep input: copy runtime lib to input
 cd ../run/
@@ -31,7 +30,7 @@ cp runtime_libs/hartree/libiomp5.so input
 
 # preparations complete, specify how threads will be placed and conduct the experiment
 cd ../run/input
-export MYJOB="./infoli.x $size $density $simtime"
+export MYJOB="./infoli.x -n $size -p $density -t $simtime"
 /usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" ssh ${MICNAME} "\
 export LD_LIBRARY_PATH=~/InfOliFull/run/input:$LD_LIBRARY_PATH; \
 export KMP_AFFINITY=balanced; export KMP_PLACE_THREADS=57c,4t; \

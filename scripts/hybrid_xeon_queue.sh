@@ -49,7 +49,7 @@ do
 		for threads in 10
 		do
 
-			export MYJOB="$bindir/infoli.x $size $pct 10"
+			export MYJOB="$bindir/infoli.x -n $size -p $pct -t 10"
 			export OMP_NUM_THREADS=$threads
 
 			/usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" mpirun -np $ranks -genvall ${MYJOB}

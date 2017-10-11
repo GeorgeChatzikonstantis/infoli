@@ -32,7 +32,7 @@ export KMP_PLACE_THREADS=20c,1t
 
 # preparations complete, conduct the experiment
 cd ../run/input
-export MYJOB="./infoli.x $size $density $simtime"
+export MYJOB="./infoli.x -n $size -p $density -t $simtime"
 export OMP_NUM_THREADS=$threads
 /usr/bin/time -f "Total Time:\t%E\tMem Usage:\t%MkB" ${MYJOB}
 

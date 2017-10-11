@@ -127,8 +127,10 @@ int main(int argc, char **argv){
 	 */ 
 
 	int option = 0;
-	while ((option = getopt(argc, argv,"n:p:t:i:c:o:")) != -1) {
+	while ((option = getopt(argc, argv,"hn:p:t:i:c:o:")) != -1) {
 		switch (option) {
+			case 'h' : print_usage();
+				return 0;
 			case 'n' : IO_NETWORK_SIZE = atoi(optarg);
 				if (IO_NETWORK_SIZE<=0) {
 					printf("Incorrect network size argument. Using default value of 1000.\n");

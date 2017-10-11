@@ -58,7 +58,7 @@ do
 	for pct in 0.1
 	do
 
-		export MYJOB="$bindir/infoli.x $size $pct 10"
+		export MYJOB="$bindir/infoli.x -n $size -p $pct -t 10"
 		export OMP_NUM_THREADS=$(bc -l <<< "scale=0; 200/$ranks_per_node")
 
 		micnativeloadex $bindir/infoli.x -a "1000 0.1 10" -e "export OMP_NUM_THREADS=200"

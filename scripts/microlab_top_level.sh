@@ -72,7 +72,7 @@ done
 echo "SIZE= ${SIZE}|Density= ${PROB}|Simtime= ${STIME}|Threads=$THREADSNUM DNameP:$DNAME"
 mkdir -p $CUR_DIR/$DNAME
 
-MYJOB="../infoli.x ${SIZE} ${PROB} ${STIME}"
+MYJOB="../infoli.x -n ${SIZE} -p ${PROB} -t ${STIME}"
 
 ssh $MICNAME "mkdir -p $DNAME"
 

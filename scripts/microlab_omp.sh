@@ -49,7 +49,7 @@ echo "Repetition $reps/$max_reps Commencing."
 			echo "Synapses = $synapses"
 
 			density=$(bc -l <<< "scale=6; $synapses/$size")
-			export MYJOB="./infoli.x $size $density $simtime"
+			export MYJOB="./infoli.x -n $size -p $density -t $simtime"
 
 			for threads in 200
 			do
