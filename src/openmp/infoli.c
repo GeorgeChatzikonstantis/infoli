@@ -130,10 +130,28 @@ int main(int argc, char **argv){
 	while ((option = getopt(argc, argv,"n:p:t:i:c:o:")) != -1) {
 		switch (option) {
 			case 'n' : IO_NETWORK_SIZE = atoi(optarg);
+				if (IO_NETWORK_SIZE<=0) {
+					printf("Incorrect network size argument. Using default value of 1000.\n");
+					IO_NETWORK_SIZE = 1000;
+				}
 				break;
 			case 'p' : CONN_PROBABILITY = atof(optarg);
+				if (CONN_PROBABILITY<0) {
+					printf("Incorrect network density argument. Using default value of 0.5.\n");
+					CONN_PROBABILITY = 0.5;
+				}
+				if (CONN_PROBABILITY==0)
+					printf("Warning: Simulating non-connected network (network density = 0).\n");
+				if (CONN_PROBABILITY>1) {
+					printf("Warning: Setting network density to 1 (=100%).\n");
+					CONN_PROBABILITY = 1;
+				}
 				break;
 			case 't' : simTime = atof(optarg);
+				if (simTime<=0) {
+					printf("Incorrect simulation time argument. Using default value of 5000ms.\n");
+					simTime = 5000;
+				}
 				break;
 			case 'i' : inputFromFile = 1; inFileName = optarg;
 				break;
