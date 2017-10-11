@@ -12,6 +12,7 @@ then
 	make omp_phi
 	cd -
 	scp $root_dir/bin/infoli.x mic0:~
+	scp $root_dir/bin/default.conf mic0:~
 	scp $root_dir/lib/lib* mic0:~
 else if [[ $hostname == "crb"* ]];
 	then
