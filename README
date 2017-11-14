@@ -35,14 +35,12 @@ Centre STFC (http://community.hartree.stfc.ac.uk/wiki/site/admin/home.html).
 The folder contains scripts for executing the simulator on said
 clusters. Furthermore, for home usage and testing, /scripts
 holds sample scripts for compiling and using the OpenMP version
-of the code on an x86-based architecture and a Phi-KNC card.
+of the code on an x86-based architecture (please check sample.sh).
 
 * scripts flagged as work in progress:
 	hybrid_phi_queue.sh
 	hybrid_xeon_queue.sh
 	microlab_omp.sh
-	sample_x86.sh
-	sample_phi.sh
 
 ** Please note: the simulator executes natively on the KNC
 card and requires an ssh connection to it. It assumes
