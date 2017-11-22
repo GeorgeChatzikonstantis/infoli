@@ -53,6 +53,16 @@ BIN_DIR= ../bin/
 # --- TARGETS
 all: hybrid_xeon hybrid_phi omp_xeon omp_phi
 
+# a Docker container should be based on an image containing at least glibc, possibly more dynamic libs
+# on the other hand different libs could theoretically result in different behaviour, like libm
+# include the Intel compiler parts in the binary, so it will run on a vanilla linux system
+# (could also link to a local copy of the redistributable libs, if licensing allows)
+omp_xeon_docker: ${OMP_DIR}${SRC} ${OMP_DIR}${HDR} ${UTILS_DIR}${UTILS_O}
+	@echo #
+	@echo "Building For Pure OpenMP Dockerized Version on Xeon"
+	icc ${OMP_DIR}${SRC} -o ${OMP_DIR}${OBJ} ${OMP_FLAGS} ${COMP_FLAGS}
+	icc ${OMP_DIR}${OBJ} ${UTILS_DIR}${UTILS_O} -o ${BIN_DIR}${EXE}.docker ${OMP_FLAGS} ${LINK_FLAGS} -static-intel 
+
 omp_xeon: ${OMP_DIR}${SRC} ${OMP_DIR}${HDR} ${UTILS_DIR}${UTILS_O}
 	@echo #
 	@echo "Building For Pure OpenMP Version on Xeon"
