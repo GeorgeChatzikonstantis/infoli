@@ -396,14 +396,6 @@ int main(int argc, char *argv[]){
 		memset(conn_gen_buffer, 0, IO_NETWORK_SIZE*sizeof(int));
 	}
 
-	printf("%d: ", core_id);
-/*	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
-		printf("| %d | ", receiver_cell);
-		for (i=0; i<cellParamsPtr.total_amount_of_neighbours[receiver_cell]; i++)
-			printf("%d ", cellParamsPtr.neighId[receiver_cell][i]);
-	}
-*/	printf("\n");
-
 	/* connections mapping
 	 * for the core's cells
 	 * to the entire network
@@ -629,7 +621,15 @@ int main(int argc, char *argv[]){
 	/* start of the simulation
 	 * In case we want to read the stimulus from file inputFromFile = true
 	 */
-	gettimeofday(&tic, NULL);
+
+	accumulator_self=0;
+	accumulator_pack=0;
+	accumulator_mpi=0;
+	accumulator_sync=0;
+	accumulator_gj=0;
+	accumulator_comp=0;
+	accumulator_output=0;
+	gettimeofday(&exec_tic, NULL);
 
 	/* 	WARNING, recent changes have made inputFromFile currently unusable-
  	 *  	related code will be commented out until fixed and commited
@@ -702,30 +702,61 @@ int main(int argc, char *argv[]){
 
 			for (targetCore=0; targetCore<cores; targetCore++) {
 				if (targetCore==core_id) {
+					#ifdef PROFILING
+						gettimeofday(&tic, NULL);
+					#endif
 					//fill the receiving Voltage buffer with our updated local cells
 					memcpy(packagesVoltToReceive[core_id], V_dend, cellCount*sizeof(mod_prec));
 					r_request[targetCore]=MPI_REQUEST_NULL;
+					#ifdef PROFILING
+						gettimeofday(&toc, NULL);
+						accumulator_self += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+					#endif
 				} else {
+					#ifdef PROFILING
+						gettimeofday(&tic, NULL);
+					#endif
 					for (package_index=0; package_index<packagesToSend[targetCore]; package_index++) {
 						requested_neighbour = packagesIndexToSend[targetCore][package_index]-core_offset;
 						packagesVoltToSend[targetCore][package_index] = V_dend[requested_neighbour];
 					}
+					#ifdef PROFILING
+						gettimeofday(&toc, NULL);
+						accumulator_pack += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+					#endif
 
 	/*	We then call MPI functions for sending the voltage-buffer and receiving
 	 *	our respective voltage-buffer
 	 */
+					#ifdef PROFILING
+						gettimeofday(&tic, NULL);
+					#endif
 					if (packagesToSend[targetCore]>0)
 						MPI_Isend(packagesVoltToSend[targetCore], packagesToSend[targetCore], MPI_FLOAT, targetCore, 0, MPI_COMM_WORLD, &s_request[targetCore]);
 					if (packagesToReceive[targetCore]>0)
 						MPI_Irecv(packagesVoltToReceive[targetCore], packagesToReceive[targetCore], MPI_FLOAT, targetCore, 0, MPI_COMM_WORLD, &r_request[targetCore]);
+					#ifdef PROFILING
+						gettimeofday(&toc, NULL);
+						accumulator_mpi += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+					#endif
 				}
 			}
+			#ifdef PROFILING
+				gettimeofday(&tic, NULL);
+			#endif
 			syncing(r_request);
 			cleanup_requests(r_request);
+			#ifdef PROFILING
+				gettimeofday(&toc, NULL);
+				accumulator_sync += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+			#endif
 
 	/*	First Loop takes care of Gap Junction Functions
  	*/			
 
+			#ifdef PROFILING
+				gettimeofday(&tic, NULL);
+			#endif
 		#pragma omp parallel for shared (cellParamsPtr, packagesIndexMatcher, packagesVoltToReceive, iApp, iAppIn, V_dend, I_c, \
 		pOutFile) private(target_cell, i, requested_neighbour, targetCore, f, V, coded_package_index, decoded_package_index, \
 		voltage, I_c_storage) firstprivate(simulation_array_ID)
@@ -759,12 +790,19 @@ int main(int argc, char *argv[]){
 					V = V_dend[target_cell] - voltage;
 					f = 0.8f * expf(-1*powf(V, 2)/100) + 0.2f;// SCHWEIGHOFER 2004 VERSION
 					I_c_storage += cellParamsPtr.neighConductances[target_cell][i] * f * V;
-                                }	
+				}
 				I_c[target_cell] = I_c_storage;
 			}
+			#ifdef PROFILING
+				gettimeofday(&toc, NULL);
+				accumulator_gj += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+			#endif
 
 	/* Second Loop computes the new state (voltages, channels etc.)
- 	*/ 
+ 	*/
+			#ifdef PROFILING
+				gettimeofday(&tic, NULL);
+			#endif
 
 			__assume_aligned(V_dend, 64);
 			__assume_aligned(Hcurrent_q, 64);
@@ -921,10 +959,16 @@ int main(int argc, char *argv[]){
 //				~END OF COMPUTATIONS~
  
 			}
-
+			#ifdef PROFILING
+				gettimeofday(&toc, NULL);
+				accumulator_comp += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+			#endif
 
 			if (PRINTING&&((simStep%print_granularity)==0)) {
 
+				#ifdef PROFILING
+					gettimeofday(&tic, NULL);
+				#endif
 			#pragma omp parallel for simd shared (V_axon, pOutFile) private(target_cell, tempbuf)
 				for (target_cell=0;target_cell<cellCount;target_cell++) {
 					#ifndef G_CAL_FROM_FILE
@@ -937,13 +981,17 @@ int main(int argc, char *argv[]){
 
 				sprintf(tempbuf, "\n");
 				fputs(tempbuf, pOutFile);
+				#ifdef PROFILING
+					gettimeofday(&toc, NULL);
+					accumulator_output += ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - (tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0)));
+				#endif
 			}
 		
 		}
 
 //	}
 
-	gettimeofday(&toc, NULL);
+	gettimeofday(&exec_toc, NULL);
 		
 	/* SIM END
 	 * Free  memory and close files
@@ -960,13 +1008,27 @@ int main(int argc, char *argv[]){
 	/* Execution Time for the Sim
 	 */
 
-	printf("Execution Time for Simulation: %0.2f ms.\n", ((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
-		(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
+	if (core_id==0) {
+		printf("Execution Time for Simulation: %0.2f ms.\n", ((exec_toc.tv_sec*1000.0 + ((float)(exec_toc.tv_usec)/1000.0)) - \
+		(exec_tic.tv_sec*1000.0 + ((float)(exec_tic.tv_usec)/1000.0))));
+		#ifdef PROFILING
+			printf("Execution Time Spent in self-organization: %0.2f ms.\n", accumulator_self);
+			printf("Execution Time Spent in packing: %0.2f ms.\n", accumulator_pack);
+			printf("Execution Time Spent in MPI collectives: %0.2f ms.\n", accumulator_mpi);
+			printf("Execution Time Spent in core syncing: %0.2f ms.\n", accumulator_sync);
+			printf("Execution Time Spent in computing Gap Junctions: %0.2f ms.\n", accumulator_gj);
+			printf("Execution Time Spent in computing Compartments: %0.2f ms.\n", accumulator_comp);
+		#endif
+	}
 	if (PRINTING) {
+		#ifdef PROFILING
+			if (core_id==0)
+				printf("Execution Time Spent in Output: %0.2f ms.\n", accumulator_output);
+		#endif
 		pOutFile = fopen (outFileName, "rb+");
 		sprintf(tempbuf, "Execution Time for Simulation in ms: %0.2f\n", \
-			((toc.tv_sec*1000.0 + ((float)(toc.tv_usec)/1000.0)) - \
-			(tic.tv_sec*1000.0 + ((float)(tic.tv_usec)/1000.0))));
+			((exec_toc.tv_sec*1000.0 + ((float)(exec_toc.tv_usec)/1000.0)) - \
+			(exec_tic.tv_sec*1000.0 + ((float)(exec_tic.tv_usec)/1000.0))));
 		#ifndef G_CAL_FROM_FILE
 			fputs(tempbuf, pOutFile);
 		#endif
@@ -980,8 +1042,7 @@ int main(int argc, char *argv[]){
 void syncing(MPI_Request* request) {
 
 /* a function that first makes sure all requests passed on to it are completed
- * and then calls an MPI_Barrier to make sure all processes are in sync. We expect
- * one request from each core employed by the app
+ * We expect one request from each core employed by the app
  */
 
         int i, done = 0, flag, no_of_reqs = cores;
@@ -999,7 +1060,6 @@ void syncing(MPI_Request* request) {
                 }
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
         return;
 
 }

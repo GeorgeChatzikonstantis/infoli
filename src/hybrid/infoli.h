@@ -32,7 +32,8 @@
 int core_id, cores, cellCount, core_offset;
 int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
 float CONN_PROBABILITY;
-struct timeval tic, toc;
+struct timeval exec_tic, exec_toc, tic, toc;
+float accumulator_self, accumulator_pack, accumulator_mpi, accumulator_sync, accumulator_gj, accumulator_comp, accumulator_output;
 
 /*** TYPEDEFS AND STRUCTS***/
 //typedef double mod_prec;

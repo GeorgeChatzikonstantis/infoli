@@ -25,6 +25,9 @@ LINK_FLAGS= -O3 -lm
 # regression check directive
 REG_TEST_FLAGS= -DG_CAL_FROM_FILE
 
+# profiling directive
+PROFILING= -DPROF
+
 # mic directives
 MIC= -mmic
 
@@ -83,6 +86,12 @@ hybrid_xeon: ${HYBRID_DIR}${SRC} ${HYBRID_DIR}${HDR} ${UTILS_DIR}${UTILS_O}
 	@echo "Building For Hybrid Version on Xeon"
 	mpiicc ${HYBRID_DIR}${SRC} -o ${HYBRID_DIR}${OBJ} ${HYBRID_FLAGS} ${COMP_FLAGS}
 	mpiicc ${HYBRID_DIR}${OBJ} ${UTILS_DIR}${UTILS_O} -o ${BIN_DIR}${EXE} ${HYBRID_FLAGS} ${LINK_FLAGS}
+
+hybrid_xeon_prof: ${HYBRID_DIR}${SRC} ${HYBRID_DIR}${HDR} ${UTILS_DIR}${UTILS_O}
+	@echo #
+	@echo "Building For Hybrid Version on Xeon with Profiling Info Enabled"
+	mpiicc ${HYBRID_DIR}${SRC} -o ${HYBRID_DIR}${OBJ} ${HYBRID_FLAGS} ${PROFILING} ${COMP_FLAGS}
+	mpiicc ${HYBRID_DIR}${OBJ} ${UTILS_DIR}${UTILS_O} -o ${BIN_DIR}${EXE} ${HYBRID_FLAGS} ${PROFLING} ${LINK_FLAGS}
 
 hybrid_phi: ${HYBRID_DIR}${SRC} ${HYBRID_DIR}${HDR} ${UTILS_DIR}${UTILS_PHI_O}
 	@echo #
