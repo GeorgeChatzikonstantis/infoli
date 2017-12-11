@@ -26,7 +26,7 @@ LINK_FLAGS= -O3 -lm
 REG_TEST_FLAGS= -DG_CAL_FROM_FILE
 
 # profiling directive
-PROFILING= -DPROF
+PROFILING= -DPROFILING
 
 # mic directives
 MIC= -mmic
