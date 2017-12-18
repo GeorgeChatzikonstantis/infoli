@@ -4,7 +4,7 @@ echo "Runs a job with the infoli simulator from current Directory."
 echo "It creates a new folder or a given folder outputs the results there"
 echo "Usage: ./script_name.sh -dir <dir to put results (doesn't need"
 echo "to exist)> -ns <network size> -pb <network density> -st <simulation time>"
-echo "-np <number of MPI ranks to spawn>"
+echo "-np <number of MPI ranks to spawn> -nd <number of nodes to be used>"
 echo "If no argument is given it runs on default values!"
 
 # Get the Directories
@@ -25,10 +25,10 @@ echo $NAME
 # LSF queue system options
 
 WALL="walltime=72:00:00"
-BQUE=phi-n2h72
+BQUE=phi-n18h72
+NODES=1
 RANKS=4
 THREADSNUM=50
-TOPOLOGY="nodes=1:ppn=4"
 
 # Experiment variables
 SIZE=100
@@ -61,6 +61,10 @@ do
 	    RANKS="$2"
 	    shift # past argument
 	    ;;
+	-nd|-nodes)
+	    NODES="$2"
+	    shift # past argument
+	    ;;
 
         *)
             # unknown option
@@ -69,6 +73,8 @@ do
     esac
     shift # past argument or value
 done
+
+TOPOLOGY="nodes=$NODES:ppn=4"
 
 DATE=`date +%T`
 NAME="exp"_${SIZE}_${PROB}_$DATE
