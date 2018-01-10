@@ -113,6 +113,8 @@ int main(int argc, char *argv[]){
 	/* We first set some default values
 	*/
 
+	gettimeofday(&exec_tic, NULL);
+
 	IO_NETWORK_SIZE = 1000;
 	CONN_PROBABILITY = 0.5;
 	simTime = 5000;
@@ -617,6 +619,11 @@ int main(int argc, char *argv[]){
 
 		}
 	}
+
+	gettimeofday(&exec_toc, NULL);
+	if (core_id==0)
+		printf("Setup Time for Simulation: %0.2f ms.\n", ((exec_toc.tv_sec*1000.0 + ((float)(exec_toc.tv_usec)/1000.0)) - \
+		(exec_tic.tv_sec*1000.0 + ((float)(exec_tic.tv_usec)/1000.0))));
 
 	/* start of the simulation
 	 * In case we want to read the stimulus from file inputFromFile = true

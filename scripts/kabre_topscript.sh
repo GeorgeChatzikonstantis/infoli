@@ -79,7 +79,8 @@ TOPOLOGY="nodes=$NODES:ppn=4"
 DATE=`date +%T`
 NAME="exp"_${SIZE}_${PROB}_$DATE
 
-JOB=$NAME"-job"
+SYNAPSES=$(bc -l <<< "scale=0; $SIZE*$PROB")
+JOB="exp"_${SIZE}_${SYNAPSES}
 B_OUT=$CUR_DIR/$NAME/job.out
 B_ERR=$CUR_DIR/$NAME/job.err
 
