@@ -346,7 +346,8 @@ int main(int argc, char *argv[]){
 	 */
 
 	int sender_cell, receiver_cell;
-	int* conn_gen_buffer=(int*) calloc(IO_NETWORK_SIZE, sizeof(int));	//temp buffer for storing bonds
+	//temp buffer for storing bonds
+	int* conn_gen_buffer=(int*) calloc(IO_NETWORK_SIZE, sizeof(int));
 	float rndm;
 
 	/* we generate rng checks against the probability
@@ -361,26 +362,16 @@ int main(int argc, char *argv[]){
 
 	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
 		global_cell_id = receiver_cell + core_offset;
-		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
 
-			if (sender_cell == global_cell_id)
-				;		//no self-feeding connections allowed
-			else {
-				rndm = ((float) rand()) / ((float) RAND_MAX);	//generate rng and compare to probability
-				if (rndm <= CONN_PROBABILITY) {
-					cellParamsPtr.total_amount_of_neighbours[receiver_cell]++;  //increase neighbour count
-					conn_gen_buffer[sender_cell]++;	//mark that we formed a bond with this cell
-					if ((sender_cell/cellCount)!=core_id) //if this cell does not belong to core
-						cellsNeeded[sender_cell]  = 1; //mark it
-				}
-			}
-		}
+		//generate connections in the conn_gen_buffer according to a distribution
+		//function also marks which cells are external (do not belong to core/MPIrank)
+		cellParamsPtr.total_amount_of_neighbours[receiver_cell]=conn_marking_uniform(conn_gen_buffer, cellsNeeded, global_cell_id, cellCount, IO_NETWORK_SIZE, CONN_PROBABILITY, core_id);
 
 		//allocate enough space now that we know how many neighbours this receiving cell has
 		cellParamsPtr.neighConductances[receiver_cell] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(mod_prec), 64);
 		cellParamsPtr.neighId[receiver_cell] = (int*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(int), 64);
 
-		//run through the temporary buffer and fill the data structs with the bonds' info
+		//run through the conn_gen_buffer and fill the data structs with the bonds' info
 		i=0;	//this temporary variable will help fill the data structs
 		for (sender_cell=0;sender_cell<IO_NETWORK_SIZE;sender_cell++) {
 			if (conn_gen_buffer[sender_cell]==0)
@@ -397,6 +388,9 @@ int main(int argc, char *argv[]){
 		//reset the buffer for the next receiver cell
 		memset(conn_gen_buffer, 0, IO_NETWORK_SIZE*sizeof(int));
 	}
+
+	if (core_id==0)
+		print_connections(cellParamsPtr.neighId[0], 0, cellParamsPtr.total_amount_of_neighbours[0]);
 
 	/* connections mapping
 	 * for the core's cells

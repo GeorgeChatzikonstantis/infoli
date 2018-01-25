@@ -6,8 +6,7 @@
 #include <sys/time.h>
 #include <time.h>
 
-int core_id, cores, cellCount;
-int IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
+int cellCount, IO_NETWORK_DIM1, IO_NETWORK_DIM2, IO_NETWORK_SIZE;
 
 typedef float mod_prec;
 
@@ -23,6 +22,21 @@ void print_usage() {
 	printf("-i denotes a filename for input stimulus. By default, stimulus is hardcoded.\n");
 	printf("-c denotes a filename for configuration file. By default, configuration is read from default.conf.\n");
 	printf("-o denotes a filename for simulation output. Default value: InferiorOlive_Output.txt.\n");
+
+}
+
+void print_connections(int* conn_array, int cell_id, int connections_no) {
+
+	printf("Cell %d has %d connections:", cell_id, connections_no);
+	int i;
+	for (i=0; i<connections_no;i++) {
+		if ((i%10)==0)
+			printf("\n");
+		printf("%d ", conn_array[i]);
+	}
+	printf("\n");
+
+	return;
 
 }
 
@@ -143,6 +157,184 @@ void read_parameters(char* paramsFileName, mod_prec* values) {
 	free(valueName);
 
 	return;
+}
+
+int conn_marking_uniform(int* conn_buffer, short* external_cell, int global_cell_id, int local_nw_size, int nw_size, double probability, int core_id) {
+
+	int total_amount_connections=0, sender_cell;
+	float rndm;
+
+	for (sender_cell=0;sender_cell<nw_size;sender_cell++) {
+		if (sender_cell == global_cell_id)
+			;               //no self-feeding connections allowed
+		else {
+			rndm = ((float) rand()) / ((float) RAND_MAX);   //generate rng and compare to probability
+			if (rndm <= probability) {
+				total_amount_connections++;  //increase neighbour count
+				conn_buffer[sender_cell]++; //mark that we formed a bond with this cell
+				if ((sender_cell/local_nw_size)!=core_id) //if this cell does not belong to core
+					external_cell[sender_cell]  = 1; //mark it
+			}
+		}
+
+	}
+	return total_amount_connections;
+}
+
+int generate_gaussian_number(int lower_bound, int higher_bound) {
+
+	float x = 0, rndm;
+	int range = higher_bound - lower_bound;
+	int i, reps=20;
+
+	for (i=0;i<reps;i++) {
+		rndm = ((float) rand()) / ((float) RAND_MAX);
+		x += rndm;
+	}
+	x /= reps; //generate a normally-distributed number in [0,1]
+	x *= range; //generate a normally-distribute number in [0,range]
+	x += lower_bound; //generate a normally-distributed number in [lower_bound, higher_bound]
+	
+	return (round(x));
+
+}
+
+int conn_marking_gaussian_1D(int* conn_buffer, short* external_cell, int global_cell_id, int local_nw_size, int nw_size, double probability, int core_id) {
+
+	int total_amount_connections=0, sender_cell;
+	float mean=0, deviation=1.0, scale=367.647;
+	float gaussian_probability;
+	float rndm;
+	
+
+	float average_connections=nw_size*probability;
+	if (probability==0)
+		total_amount_connections=0;
+	else
+		total_amount_connections=generate_gaussian_number(round(average_connections*0.9), round(average_connections*1.1));
+
+	float x = 1 / (deviation*sqrt(2*M_PI));
+	float y = -(1 / (2 * pow(deviation, 2)));
+
+	float distance_1D=0.0;
+	int connections_found=0;
+	while (connections_found<total_amount_connections) {
+		for (sender_cell=0; sender_cell<nw_size; sender_cell++) {
+			if (connections_found>=total_amount_connections)
+				break;
+			if (sender_cell == global_cell_id)
+				;		//no self-feeding connections allowed
+			else if (conn_buffer[sender_cell])
+				;		//cell already marked
+			else {
+				distance_1D = ((float)(abs(sender_cell-global_cell_id)))/scale;
+				gaussian_probability = x * exp(pow(distance_1D-mean,2)*y); //if ((core_id==0)&&((sender_cell%100)==0)) printf("%.2f:%.3f%% ", distance_1D, 100*gaussian_probability);
+				rndm = ((float) rand()) / ((float) RAND_MAX);   //generate rng and compare to probability
+				if (rndm <= gaussian_probability) {
+					conn_buffer[sender_cell]++; //mark that we formed a bond with this cell
+					connections_found++;  //increase amount of marks
+					if ((sender_cell/local_nw_size)!=core_id) //if this cell does not belong to core
+						external_cell[sender_cell]  = 1; //mark it
+				}
+			}
+		}
+
+	}
+	return connections_found;
+
+}
+
+int conn_marking_gaussian_3D(int* conn_buffer, short* external_cell, int global_cell_id, int local_nw_size, int nw_size, double probability, int core_id) {
+
+	int total_amount_connections=0, sender_cell;
+	float mean=0, deviation=1.0, scale=20; //scale 7.15 makes it so that neuron 1000 units away has 10% chance
+	float gaussian_probability;
+	float rndm;
+
+	int base_3D= ((int)(pow(nw_size,0.33333)))+1;
+	int base_3D_squared=base_3D*base_3D;
+
+	int my_x=global_cell_id/base_3D_squared;
+	int my_y=(global_cell_id%base_3D_squared)/base_3D;
+	int my_z=(global_cell_id%base_3D_squared)%base_3D;
+
+	int sender_x, sender_y, sender_z;
+
+	float average_connections=nw_size*probability;
+	if (probability==0)
+		total_amount_connections=0;
+	else
+		total_amount_connections=generate_gaussian_number(round(average_connections*0.9), round(average_connections*1.1));
+
+        float const1 = 2.5 / (deviation*sqrt(2*M_PI));
+        float const2 = -(1 / (2 * pow(deviation, 2)));
+
+        float distance_3D=0.0;
+        int connections_found=0;
+        while (connections_found<total_amount_connections) {
+                for (sender_cell=0; sender_cell<nw_size; sender_cell++) {
+                        if (connections_found>=total_amount_connections)
+                                break;
+                        if (sender_cell == global_cell_id)
+                                ;               //no self-feeding connections allowed
+                        else if (conn_buffer[sender_cell])
+                                ;               //cell already marked
+                        else {
+				sender_x=sender_cell/base_3D_squared;
+				sender_y=(sender_cell%base_3D_squared)/base_3D;
+				sender_z=(sender_cell%base_3D_squared)%base_3D;
+
+                                distance_3D = (sqrt(pow(my_x-sender_x,2)+pow(my_y-sender_y,2)+pow(my_z-sender_z,2)))/scale;
+                                gaussian_probability = const1 * exp(pow(distance_3D-mean,2)*const2);
+		//	if (((sender_cell%1)==0)&&(global_cell_id==0)) printf("x:%d y:%d z:%d->%.2f, %.3f%%\n", sender_x, sender_y, sender_z, distance_3D, 100*gaussian_probability);
+                                rndm = ((float) rand()) / ((float) RAND_MAX);   //generate rng and compare to probability
+                                if (rndm <= gaussian_probability) {
+                                        conn_buffer[sender_cell]++; //mark that we formed a bond with this cell
+                                        connections_found++;  //increase amount of marks
+                                        if ((sender_cell/local_nw_size)!=core_id) //if this cell does not belong to core
+                                                external_cell[sender_cell]  = 1; //mark it
+                                }
+                        }
+                }
+
+        }
+        return connections_found;
+
+}
+
+int conn_marking_nearest_1D(int* conn_buffer, short* external_cell, int global_cell_id, int local_nw_size, int nw_size, double probability, int core_id) {
+
+	int total_amount_connections=0, sender_cell, connections_found=0, step;
+	float average_connections=nw_size*probability;
+
+	if (probability==0)
+		total_amount_connections=0;
+	else
+		total_amount_connections=generate_gaussian_number(round(average_connections*0.9), round(average_connections*1.1));
+
+	step=1;
+	while ((connections_found < total_amount_connections)&&(step<nw_size)) {
+
+		sender_cell=global_cell_id+step;
+		if (sender_cell<nw_size) {
+			conn_buffer[sender_cell]++; //mark that we formed a bond with this cell
+			connections_found++;  //increase amount of marks
+			if ((sender_cell/local_nw_size)!=core_id) //if this cell does not belong to core
+				external_cell[sender_cell]  = 1; //mark it
+		}
+
+		sender_cell=global_cell_id-step;
+		if (sender_cell>=0) {
+			conn_buffer[sender_cell]++; //mark that we formed a bond with this cell
+			connections_found++;  //increase amount of marks
+			if ((sender_cell/local_nw_size)!=core_id) //if this cell does not belong to core
+				external_cell[sender_cell]  = 1; //mark it
+		}
+
+		step++;
+	}
+
+	return connections_found;
 }
 
 inline mod_prec min(mod_prec a, mod_prec b){
