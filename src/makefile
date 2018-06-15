@@ -18,9 +18,9 @@ UTILS_O= utils.o
 UTILS_PHI_O= utils_phi.o
 
 # common directives
-COMP_FLAGS= -c -Wall -O3 -vec-report6 -opt-subscript-in-range -opt-report-phase ipo_inl -lm
+COMP_FLAGS= -c -Wall -O3 -axMIC-AVX512 -vec-report6 -qopt-subscript-in-range -qopt-report-phase ipo_inl -lm
 UTILS_FLAGS= -c -Wall -O3 -lm
-LINK_FLAGS= -O3 -lm
+LINK_FLAGS= -O3 -axMIC-AVX512 -lm
 
 # regression check directive
 REG_TEST_FLAGS= -DG_CAL_FROM_FILE
@@ -41,8 +41,8 @@ IRNGSO= irng
 SVMLSO= svml
 
 # version directives
-OMP_FLAGS= -openmp
-HYBRID_FLAGS= -mt_mpi -openmp
+OMP_FLAGS= -qopenmp
+HYBRID_FLAGS= -mt_mpi -qopenmp
 
 # subdirectories
 OMP_DIR= openmp/

@@ -365,7 +365,7 @@ int main(int argc, char *argv[]){
 
 		//generate connections in the conn_gen_buffer according to a distribution
 		//function also marks which cells are external (do not belong to core/MPIrank)
-		cellParamsPtr.total_amount_of_neighbours[receiver_cell]=conn_marking_uniform(conn_gen_buffer, cellsNeeded, global_cell_id, cellCount, IO_NETWORK_SIZE, CONN_PROBABILITY, core_id);
+		cellParamsPtr.total_amount_of_neighbours[receiver_cell]=conn_marking_gaussian_3D(conn_gen_buffer, cellsNeeded, global_cell_id, cellCount, IO_NETWORK_SIZE, CONN_PROBABILITY, core_id);
 
 		//allocate enough space now that we know how many neighbours this receiving cell has
 		cellParamsPtr.neighConductances[receiver_cell] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(mod_prec), 64);
@@ -389,9 +389,20 @@ int main(int argc, char *argv[]){
 		memset(conn_gen_buffer, 0, IO_NETWORK_SIZE*sizeof(int));
 	}
 
-	if (core_id==0)
+/*	if (core_id==0)
 		print_connections(cellParamsPtr.neighId[0], 0, cellParamsPtr.total_amount_of_neighbours[0]);
 
+	i=0;
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++)
+		i+=cellParamsPtr.total_amount_of_neighbours[receiver_cell];
+	fprintf(pOutFile, "%d %d 000\n", IO_NETWORK_SIZE, i);
+	for (receiver_cell=0; receiver_cell<cellCount; receiver_cell++) {
+		for (i=0; i<cellParamsPtr.total_amount_of_neighbours[receiver_cell]; i++)
+			fprintf(pOutFile, "%d ", cellParamsPtr.neighId[receiver_cell][i]+1 );
+		fprintf(pOutFile, "\n");
+	}
+	return;
+*/
 	/* connections mapping
 	 * for the core's cells
 	 * to the entire network
