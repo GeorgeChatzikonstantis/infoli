@@ -28,7 +28,6 @@ WALL="walltime=72:00:00"
 BQUE=phi-n18h72
 NODES=1
 RANKS=4
-THREADSNUM=50
 
 # Experiment variables
 SIZE=100
@@ -74,7 +73,9 @@ do
     shift # past argument or value
 done
 
-TOPOLOGY="nodes=$NODES:ppn=4"
+RANKSPERNODE=$(($RANKS / $NODES))
+TOPOLOGY="nodes=$NODES:ppn=$RANKSPERNODE"
+THREADSNUM=$((200 / $RANKSPERNODE))
 
 DATE=`date +%T`
 NAME="exp"_${SIZE}_${PROB}_$DATE

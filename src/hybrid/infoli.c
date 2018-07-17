@@ -365,7 +365,7 @@ int main(int argc, char *argv[]){
 
 		//generate connections in the conn_gen_buffer according to a distribution
 		//function also marks which cells are external (do not belong to core/MPIrank)
-		cellParamsPtr.total_amount_of_neighbours[receiver_cell]=conn_marking_gaussian_3D(conn_gen_buffer, cellsNeeded, global_cell_id, cellCount, IO_NETWORK_SIZE, CONN_PROBABILITY, core_id);
+		cellParamsPtr.total_amount_of_neighbours[receiver_cell]=conn_marking_uniform(conn_gen_buffer, cellsNeeded, global_cell_id, cellCount, IO_NETWORK_SIZE, CONN_PROBABILITY, core_id);
 
 		//allocate enough space now that we know how many neighbours this receiving cell has
 		cellParamsPtr.neighConductances[receiver_cell] = (mod_prec*) _mm_malloc(cellParamsPtr.total_amount_of_neighbours[receiver_cell]*sizeof(mod_prec), 64);
@@ -982,7 +982,8 @@ int main(int argc, char *argv[]){
 					gettimeofday(&tic, NULL);
 				#endif
 			#pragma omp parallel for simd shared (V_axon, pOutFile) private(target_cell, tempbuf)
-				for (target_cell=0;target_cell<cellCount;target_cell++) {
+//				for (target_cell=0;target_cell<cellCount;target_cell++) {
+				for (target_cell=0;target_cell<1;target_cell++) {
 					#ifndef G_CAL_FROM_FILE
 						sprintf(tempbuf, "%d : %.8f ", target_cell+1, V_axon[target_cell]);
 					#else
